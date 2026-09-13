@@ -7,7 +7,6 @@ node_modules/
 .expo/
 dist/
 web-build/
-# expo-env.d.ts is committed on purpose: CI runs `tsc` without starting Expo.
 
 # Native
 .kotlin/
