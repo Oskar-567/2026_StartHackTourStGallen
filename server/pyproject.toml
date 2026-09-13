@@ -1,0 +1,37 @@
+[project]
+name = "server"
+version = "0.1.0"
+requires-python = ">=3.13"
+dependencies = [
+    "dj-database-url>=3.1.2",
+    "django>=6.1.1",
+    "django-cors-headers>=4.9.0",
+    "djangorestframework>=3.18.1",
+    "drf-spectacular>=0.30.0",
+    "gunicorn>=26.2.0",
+    "psycopg[binary]>=3.3.5",
+    "python-dotenv>=1.2.3",
+    "whitenoise>=6.12.0",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=9.1.1",
+    "pytest-django>=4.14.0",
+    "ruff>=0.16.7",
+]
+
+[tool.pytest.ini_options]
+DJANGO_SETTINGS_MODULE = "config.settings"
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+addopts = "--strict-markers"
+# WhiteNoise warns when collectstatic has not run; irrelevant for tests.
+filterwarnings = ["ignore:No directory at:UserWarning"]
+
+[tool.ruff]
+line-length = 100
+extend-exclude = ["**/migrations/**"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "DJ"]
