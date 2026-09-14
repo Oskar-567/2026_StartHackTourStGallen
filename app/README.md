@@ -1,56 +1,96 @@
-# Welcome to your Expo app 👋
+<div align="center">
 
-This is an [Expo](https://expo.dev) project created with [`create-expo-app`](https://www.npmjs.com/package/create-expo-app).
+# App
 
-## Get started
+**Expo app for Android, iOS and web — delivered via EAS.**
 
-1. Install dependencies
+![Expo](https://img.shields.io/badge/Expo-SDK_57-000020?logo=expo&logoColor=white)
+![React Native](https://img.shields.io/badge/React_Native-0.86-087EA4?logo=react&logoColor=white)
+![TypeScript](https://img.shields.io/badge/TypeScript-strict-3178C6?logo=typescript&logoColor=white)
+![Expo Router](https://img.shields.io/badge/expo--router-file--based-000020?logo=expo&logoColor=white)
 
-   ```bash
-   npm install
-   ```
+[**Web app**](https://123onetothree-hackathon.expo.app) ·
+[**Android APK**](https://expo.dev/accounts/123onetothree/projects/hackathon/builds) ·
+[← Back to main README](../README.md)
 
-2. Start the app
+</div>
 
-   ```bash
-   npx expo start
-   ```
+---
 
-In the output, you'll find options to open the app in a
+## Local Development
 
-- [development build](https://docs.expo.dev/develop/development-builds/introduction/)
-- [Android emulator](https://docs.expo.dev/workflow/android-studio-emulator/)
-- [iOS simulator](https://docs.expo.dev/workflow/ios-simulator/)
-- [Expo Go](https://expo.dev/go), a limited sandbox for trying out app development with Expo
-
-You can start developing by editing the files inside the **app** directory. This project uses [file-based routing](https://docs.expo.dev/router/introduction).
-
-## Get a fresh project
-
-When you're ready, run:
-
-```bash
-npm run reset-project
+```powershell
+Copy-Item .env.example .env   # first time only: EXPO_PUBLIC_API_URL=http://<your LAN IP>:8000
+npm install
+npx expo start                # scan the QR code with Expo Go, press w for web
 ```
 
-This command will move the starter code to the **app-example** directory and create a blank **app** directory where you can start developing.
+> [!TIP]
+> - Restart `npx expo start` after changing `.env` (add `--clear` if the old value sticks).
+> - Phone on a different network: `npx expo start --tunnel`.
+> - Check the web version (`w`) regularly — native-only libraries can break on web.
 
-### Other setup steps
+> [!WARNING]
+> - Only use libraries that work in **Expo Go**, and install them with `npx expo install <package>` (picks compatible versions).
+> - Do not keep an `.env.local` file: it overrides `.env` and points your app at production.
 
-- To set up ESLint for linting, run `npx expo lint`, or follow our guide on ["Using ESLint and Prettier"](https://docs.expo.dev/guides/using-eslint/)
-- If you'd like to set up unit testing, follow our guide on ["Unit Testing with Jest"](https://docs.expo.dev/develop/unit-testing/)
-- Learn more about the TypeScript setup in this template in our guide on ["Using TypeScript"](https://docs.expo.dev/guides/typescript/)
+## Project Layout
 
-## Learn more
+```
+app/src/
+├── app/                screens — every file is a route (expo-router)
+│   ├── _layout.tsx     root Stack navigator
+│   └── index.tsx       start screen (server health check)
+└── services/
+    └── api.ts          ALL HTTP calls: request<T>(), ApiError, typed endpoint functions
+```
 
-To learn more about developing your project with Expo, look at the following resources:
+Adding an endpoint call:
 
-- [Expo documentation](https://docs.expo.dev/): Learn fundamentals, or go into advanced topics with our [guides](https://docs.expo.dev/guides).
-- [Learn Expo tutorial](https://docs.expo.dev/tutorial/introduction/): Follow a step-by-step tutorial where you'll create a project that runs on Android, iOS, and the web.
+```ts
+// src/services/api.ts
+export type Item = { id: number; name: string };
 
-## Join the community
+export async function fetchItems(): Promise<Item[]> {
+  return request<Item[]>("/api/items/");
+}
+```
 
-Join our community of developers creating universal apps.
+Every screen handles **loading**, **error** and **success** — the production server can take up to a minute to wake up.
 
-- [Expo on GitHub](https://github.com/expo/expo): View our open source platform and contribute.
-- [Discord community](https://chat.expo.dev): Chat with Expo users and ask questions.
+## Checks
+
+```powershell
+npm run lint
+npx tsc --noEmit
+```
+
+## Deployment
+
+```mermaid
+flowchart LR
+    merge["Merge to main<br/>(app/**)"] --> checks["Lint + typecheck"]
+    checks --> update["EAS Update<br/>channel production"] --> apk["Android APK<br/>updates after 2 restarts"]
+    checks --> web["Web export"] --> hosting["EAS Hosting<br/>*.expo.app"]
+```
+
+Workflow: `.github/workflows/app-cd.yml`.
+
+| What | Command | When |
+|---|---|---|
+| Change production API URL | `eas env:update --variable-name EXPO_PUBLIC_API_URL --value <url> --environment production` | server URL changed |
+| New Android APK | `eas build --profile preview --platform android` | new native library or `app.json` change (15 builds/month) |
+
+<details>
+<summary><b>Manual web deploy from your machine</b> (normally CI does this)</summary>
+
+```powershell
+eas env:pull --environment production
+npx expo export --platform web --clear
+eas deploy --prod
+Remove-Item .env.local
+```
+
+`--clear` is required: otherwise Metro reuses cached bundles with the LAN IP from `.env`.
+
+</details>
