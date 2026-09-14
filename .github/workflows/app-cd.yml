@@ -1,0 +1,58 @@
+name: App CD
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "app/**"
+      - ".github/workflows/app-*.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: app-cd
+  cancel-in-progress: false
+
+jobs:
+  checks:
+    uses: ./.github/workflows/app-checks.yml
+
+  deploy:
+    name: EAS Update & web deploy
+    needs: checks
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: app
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: lts/*
+          cache: npm
+          cache-dependency-path: app/package-lock.json
+
+      - uses: expo/expo-github-action@v8
+        with:
+          eas-version: latest
+          token: ${{ secrets.EXPO_TOKEN }}
+          packager: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Publish OTA update to channel production
+        env:
+          COMMIT_MESSAGE: ${{ github.event.head_commit.message || 'Manual deploy' }}
+        run: |
+          subject="${COMMIT_MESSAGE%%$'\n'*}"
+          eas update --channel production --environment production --message "$subject" --non-interactive
+
+      - name: Pull EAS environment variables for the web build
+        run: eas env:pull --environment production --non-interactive
+
+      - name: Export web build
+        run: npx expo export --platform web
+
+      - name: Deploy web build to EAS Hosting
+        run: eas deploy --prod --non-interactive
