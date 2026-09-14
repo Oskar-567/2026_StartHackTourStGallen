@@ -1,0 +1,35 @@
+# Render Blueprint: https://render.com/docs/blueprint-spec
+# Deploys are triggered by .github/workflows/server-cd.yml after tests pass (autoDeployTrigger off).
+services:
+  - type: web
+    name: hackathon-server
+    runtime: python
+    plan: free
+    region: frankfurt
+    rootDir: server
+    buildCommand: uv sync --frozen --no-dev && uv run --no-dev python manage.py collectstatic --noinput
+    # Migrations run at start: pre-deploy commands are not available on the free plan.
+    startCommand: uv run --no-dev python manage.py migrate --noinput && uv run --no-dev gunicorn config.wsgi:application --bind 0.0.0.0:$PORT
+    healthCheckPath: /health/
+    autoDeployTrigger: "off"
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: hackathon-db
+          property: connectionString
+      - key: SECRET_KEY
+        generateValue: true
+      - key: DEBUG
+        value: "False"
+      - key: CORS_ALLOWED_ORIGINS
+        sync: false
+
+databases:
+  - name: hackathon-db
+    plan: free
+    region: frankfurt
+    postgresMajorVersion: "17"
+    databaseName: app
+    user: app
+    # Internal connections only. Temporarily allow your IP in the dashboard for pg_dump.
+    ipAllowList: []

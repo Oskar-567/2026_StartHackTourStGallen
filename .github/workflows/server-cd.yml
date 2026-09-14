@@ -1,0 +1,47 @@
+name: Server CD
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "server/**"
+      - "render.yaml"
+      - ".github/workflows/server-*.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: server-cd
+  cancel-in-progress: false
+
+jobs:
+  checks:
+    uses: ./.github/workflows/server-checks.yml
+
+  deploy:
+    name: Deploy to Render
+    needs: checks
+    # Skipped until the Render service exists and the SERVER_URL variable is set (see server/README.md).
+    if: vars.SERVER_URL != ''
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Trigger Render deploy for this commit
+        env:
+          RENDER_DEPLOY_HOOK_URL: ${{ secrets.RENDER_DEPLOY_HOOK_URL }}
+        run: curl --fail --silent --show-error -X POST "${RENDER_DEPLOY_HOOK_URL}&ref=${GITHUB_SHA}"
+
+      - name: Wait until this commit is live and healthy
+        env:
+          SERVER_URL: ${{ vars.SERVER_URL }}
+        run: |
+          for attempt in $(seq 1 40); do
+            body=$(curl --fail --silent --max-time 70 "${SERVER_URL}/health/" || true)
+            if echo "$body" | jq -e --arg sha "$GITHUB_SHA" '.status == "ok" and .version == $sha' > /dev/null 2>&1; then
+              echo "Healthy: $body"
+              exit 0
+            fi
+            echo "Attempt ${attempt}/40: not live yet (${body:-no response}), retrying in 20s"
+            sleep 20
+          done
+          echo "::error::Commit ${GITHUB_SHA} did not become healthy on ${SERVER_URL}"
+          exit 1
