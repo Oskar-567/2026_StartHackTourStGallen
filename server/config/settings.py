@@ -111,6 +111,14 @@ MAILERS = {
 
 CORS_ALLOWED_ORIGINS = env_list("CORS_ALLOWED_ORIGINS")
 
+# Viseca "Agent on a Leash" challenge API (server/viseca/, api/services.py) and the
+# local challenge data pack (server/api/management/commands/replay.py). The worker
+# and mandate-lifecycle views need the first two; replay.py only needs the third and
+# never uses the API key or the network.
+VISECA_BASE_URL = os.environ.get("VISECA_BASE_URL", "")
+VISECA_API_KEY = os.environ.get("VISECA_API_KEY", "")
+VISECA_DATA_DIR = os.environ.get("VISECA_DATA_DIR", "")
+
 REST_FRAMEWORK = {
     "DEFAULT_SCHEMA_CLASS": "drf_spectacular.openapi.AutoSchema",
 }
