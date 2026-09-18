@@ -55,6 +55,7 @@ ITEM_MATCH_ATTRIBUTE_UNKNOWN = "item_match_attribute_unknown"
 PURPOSE_FIT_FACTS_UNAVAILABLE = "purpose_fit_facts_unavailable"
 PURPOSE_FIT_UNREQUESTED_ITEM = "purpose_fit_unrequested_item"
 PURPOSE_FIT_CATEGORY_UNKNOWN = "purpose_fit_category_unknown"
+PURPOSE_FIT_CATEGORY_UNVERIFIED = "purpose_fit_category_unverified"
 
 # -- aggregate.py: no check fired anything notable --
 NO_CONCERNS = "no_concerns"

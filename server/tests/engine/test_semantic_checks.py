@@ -76,15 +76,36 @@ class TestItemMatch:
 
 
 class TestPurposeFit:
-    def test_in_purpose_basket_passes(self, event_factory, empty_state) -> None:
+    def test_independently_read_in_purpose_basket_passes(self, event_factory, empty_state) -> None:
         event = event_factory(mandate={"intent_spec": _GROCERY_INTENT})
-        facts = _facts(ItemFacts(line_no=1, category="groceries"))
+        facts = _facts(ItemFacts(line_no=1, category="groceries", category_verified=True))
         assert purpose_fit.check(event, empty_state, facts).verdict is Verdict.PASS
+
+    def test_a_category_only_the_merchant_vouches_for_cannot_approve(
+        self, event_factory, empty_state
+    ) -> None:
+        """An unverified category can convict, but never acquit.
+
+        Confirming a basket on the word of the party selling it is the shortcut
+        this check exists to prevent. It also means that when fact extraction is
+        unavailable, the system asks the customer instead of trusting the shop.
+        """
+        event = event_factory(mandate={"intent_spec": _GROCERY_INTENT})
+        facts = _facts(ItemFacts(line_no=1, category="groceries", category_verified=False))
+        assert purpose_fit.check(event, empty_state, facts).verdict is Verdict.UNCERTAIN
+
+    def test_a_seller_admitting_an_item_is_out_of_purpose_still_fails(
+        self, event_factory, empty_state
+    ) -> None:
+        """The other half of the asymmetry: an admission needs no verification."""
+        event = event_factory(mandate={"intent_spec": _GROCERY_INTENT})
+        facts = _facts(ItemFacts(line_no=1, category="cosmetics", category_verified=False))
+        assert purpose_fit.check(event, empty_state, facts).verdict is Verdict.FAIL
 
     def test_unrequested_item_fails(self, event_factory, empty_state) -> None:
         """The quiet failure: every number fine, but something extra in the basket."""
         event = event_factory(mandate={"intent_spec": _GROCERY_INTENT})
-        facts = _facts(ItemFacts(line_no=1, category="cosmetics"))
+        facts = _facts(ItemFacts(line_no=1, category="cosmetics", category_verified=True))
         result = purpose_fit.check(event, empty_state, facts)
         assert result.verdict is Verdict.FAIL
         assert "cosmetics" in str(result.evidence)
@@ -115,7 +136,7 @@ class TestPurposeFit:
             authorization={"items": [_item(item_category="groceries")]},
             mandate={"intent_spec": _GROCERY_INTENT},
         )
-        facts = _facts(ItemFacts(line_no=1, category="cosmetics"))
+        facts = _facts(ItemFacts(line_no=1, category="cosmetics", category_verified=True))
         assert purpose_fit.check(event, empty_state, facts).verdict is Verdict.FAIL
 
 

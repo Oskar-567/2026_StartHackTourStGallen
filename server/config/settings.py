@@ -119,6 +119,20 @@ VISECA_BASE_URL = os.environ.get("VISECA_BASE_URL", "")
 VISECA_API_KEY = os.environ.get("VISECA_API_KEY", "")
 VISECA_DATA_DIR = os.environ.get("VISECA_DATA_DIR", "")
 
+# Fact extraction (server/facts/). Which backend reads merchant product text:
+# "stand-in" (no model), "local" (Ollama on this machine), "hosted" (Anthropic API).
+# Swapping backends is an env change, never a code change -- see facts/__init__.py.
+FACTS_BACKEND = os.environ.get("FACTS_BACKEND", "stand-in")
+# Must leave the worker's watchdog (2s before the deadline) room to act.
+FACTS_TIMEOUT_SECONDS = float(os.environ.get("FACTS_TIMEOUT_SECONDS", "4"))
+OLLAMA_HOST = os.environ.get("OLLAMA_HOST", "http://127.0.0.1:11434")
+OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "qwen3:4b")
+# Reasoning models think before answering. For a one-sentence extraction that is
+# pure latency against an 8s deadline, so it is off unless deliberately enabled.
+OLLAMA_THINK = os.environ.get("OLLAMA_THINK", "false").lower() in ("1", "true", "yes")
+FACTS_MODEL = os.environ.get("FACTS_MODEL", "claude-haiku-4-5")
+ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
+
 REST_FRAMEWORK = {
     "DEFAULT_SCHEMA_CLASS": "drf_spectacular.openapi.AutoSchema",
 }

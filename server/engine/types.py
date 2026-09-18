@@ -383,6 +383,16 @@ class ItemFacts:
     """What the item actually appears to be. `None` means the extractor could
     not tell -- which is uncertainty, never permission."""
 
+    category_verified: bool = False
+    """True only when this category was read independently of the merchant.
+
+    A category copied from the merchant's own `item_category` field is the
+    seller describing their own goods. That is usable evidence against them --
+    a seller admitting an item is outside the customer's purpose settles the
+    matter -- but it can never confirm that a basket is fine. See
+    `checks/purpose_fit.py`.
+    """
+
     attributes: Mapping[str, str] = field(default_factory=dict)
     """Extracted attributes such as `{"size": "43", "colour": "black"}`."""
 

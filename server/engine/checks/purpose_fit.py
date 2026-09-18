@@ -21,9 +21,18 @@ such.
 Verdicts:
 
 - **FAIL** -- a cart line's category is outside what the customer asked for.
-- **UNCERTAIN** -- no facts, no intent spec, no stated categories, or a line
-  whose category nobody could determine.
-- **PASS** -- every line belongs to the stated purpose.
+  This holds even when the only category available is the merchant's own: a
+  seller saying their item is outside the customer's purpose settles it.
+- **UNCERTAIN** -- no facts, no intent spec, no stated categories, a line whose
+  category nobody could determine, or a line that fits **only according to the
+  merchant**. Confirming a basket on the word of the party selling it is the
+  shortcut this check exists to prevent.
+- **PASS** -- every line was read independently and belongs to the purpose.
+
+The asymmetry is the point. An unverified category can convict but not
+acquit. It also means that when fact extraction is unavailable, this check
+degrades to asking the customer rather than quietly trusting the shop --
+which is the behaviour the rest of the system promises.
 
 Semantic tier: depends on `ExtractedFacts`, produced outside this package.
 """
@@ -69,9 +78,9 @@ def check(
 
     for item in event.items:
         item_facts = None if facts is None else facts.for_line(item.line_no)
+        verified = item_facts is not None and item_facts.category_verified
         extracted = None if item_facts is None else item_facts.category
-        category = extracted if extracted is not None else item.item_category
-        claimed_by_merchant = extracted is None
+        category = extracted if extracted else item.item_category
 
         if not category:
             unknowns.append(
@@ -84,6 +93,8 @@ def check(
             continue
 
         if category.lower() not in allowed:
+            # A seller saying their own item is outside the customer's purpose
+            # settles it, whether or not we read the category independently.
             offending.append(
                 Evidence(
                     field=f"items[{item.line_no}].item_category",
@@ -91,7 +102,22 @@ def check(
                     note=(
                         f"{item.item_name!r} is a {category!r} item, which is outside the "
                         f"customer's stated purpose ({sorted(allowed)})"
-                        + (" -- category claimed by the merchant" if claimed_by_merchant else "")
+                        + ("" if verified else " -- category as claimed by the merchant")
+                    ),
+                )
+            )
+        elif not verified:
+            # It fits -- but only according to the seller. Confirming a basket
+            # on the word of the party selling it is exactly the shortcut this
+            # check exists to prevent, so this is a question, not approval.
+            unknowns.append(
+                Evidence(
+                    field=f"items[{item.line_no}].item_category",
+                    value=category,
+                    note=(
+                        f"{item.item_name!r} is within the stated purpose according to the "
+                        "merchant, but nothing read it independently; "
+                        f"reason_code={reasons.PURPOSE_FIT_CATEGORY_UNVERIFIED}"
                     ),
                 )
             )

@@ -1,6 +1,6 @@
 # CLAUDE.md
 
-Hackathon monorepo (START Hack Tour St. Gallen 2026) building Viseca's **"Agent on a Leash"** challenge: a wallet control layer that decides whether an AI shopping agent may spend a customer's money (`approve` / `decline` / `step_up`) — a Django REST API in `server/` and an Expo app in `app/`. Several teammates work in parallel under time pressure: favor small, working, CI-green increments over polish. Human-facing docs: `README.md`, `server/README.md`, `app/README.md`. **`docs/ENGINE.md` explains how the decision engine thinks — read it before changing anything under `server/engine/`.** `docs/NEXT-STEPS.md` tracks what is left to build. Full challenge brief and data pack live outside this repo — see Challenge Domain below; do not copy them in.
+Hackathon monorepo (START Hack Tour St. Gallen 2026) building Viseca's **"Agent on a Leash"** challenge: a wallet control layer that decides whether an AI shopping agent may spend a customer's money (`approve` / `decline` / `step_up`) — a Django REST API in `server/` and an Expo app in `app/`. Several teammates work in parallel under time pressure: favor small, working, CI-green increments over polish. Human-facing docs: `README.md`, `server/README.md`, `app/README.md`. **`docs/ENGINE.md` explains how the decision engine thinks — read it before changing anything under `server/engine/`.** `docs/NEXT-STEPS.md` tracks what is left to build, `docs/SETUP-LLM.md` sets up the local fact-extraction model, `docs/PITCH.md` holds the presentation arguments. Full challenge brief and data pack live outside this repo — see Challenge Domain below; do not copy them in.
 
 @app/AGENTS.md
 
@@ -35,6 +35,7 @@ Wallet control layer for Viseca's "Agent on a Leash": evaluates each purchase an
 |---|---|---|
 | `server/engine/` | The decision logic: checks, aggregation, `decide()` | Django-free and pure (see Architecture Decisions). Explained in `docs/ENGINE.md`. |
 | `server/viseca/` | HTTP client for the challenge API | Django-free. Never called from a DRF view. |
+| `server/facts/` | Fact extraction from merchant text: stand-in, local (Ollama), hosted | Backend chosen by `FACTS_BACKEND`. Never receives the policy; never raises into the decision path. See `docs/SETUP-LLM.md`. |
 | `server/api/services.py` | Orchestration: mandate lifecycle, `build_engine_state()`, recording and forwarding decisions | The only place that may talk to both the ORM and `viseca/`. |
 | `server/api/management/commands/` | `run_worker` (long-poll loop, watchdog) and `replay` (offline) | Long-running; never block a request on them. |
 | `server/api/` (models/serializers/views) | State store and the REST surface the app consumes | Views stay thin and never call the challenge API. |

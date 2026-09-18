@@ -44,13 +44,9 @@ from django.core.management.base import BaseCommand, CommandError
 from api.services import familiarity_from_rows
 from engine.decide import decide
 from engine.parsing import EventParsingError, parse_event
-from engine.types import (
-    ApprovedPurchase,
-    DecisionType,
-    EngineState,
-    ExtractedFacts,
-    ItemFacts,
-)
+from engine.types import ApprovedPurchase, DecisionType, EngineState
+from facts import build_extractor, items_from_event
+from facts.stand_in import StandInExtractor
 
 _SCENARIO_POLICIES: dict[str, dict[str, Any]] = {
     "SCEN0000": {
@@ -185,27 +181,19 @@ def _str_or_none(value: str | None) -> str | None:
     return value or None
 
 
-def _stand_in_facts(event: dict) -> ExtractedFacts:
-    """Facts built from the CSV's already-structured fields, as a placeholder.
+def _extract_facts(extractor, event: dict):
+    """Run the configured extractor over this purchase's cart lines.
 
-    This is NOT the real extractor and is not meant to become it. The real one
-    (see docs/NEXT-STEPS.md, P0-2) reads `item_details` and `item_name` with a
-    language model and can therefore recover attributes like a shoe size.
-
-    This stand-in only repeats `item_category`, which the merchant supplied. It
-    exists to prove the whole path works -- intent spec in, facts in, semantic
-    checks comparing, a decision out -- before any model is wired up. Because
-    it invents nothing, every attribute stays unknown, and purchases whose
-    policy requires one still resolve to `step_up`. That is the honest answer
-    and it marks precisely where the model is needed.
+    The stand-in is a special case: it reports the merchant's own structured
+    `item_category` rather than reading text, so it needs those categories
+    handed to it. Every model-backed extractor gets the text only.
     """
-    return ExtractedFacts(
-        items=tuple(
-            ItemFacts(line_no=item["line_no"], category=item["item_category"] or None)
-            for item in event["authorization"]["items"]
-        ),
-        source="csv-stand-in",
-    )
+    items = items_from_event(event)
+    if isinstance(extractor, StandInExtractor):
+        extractor = StandInExtractor(
+            {line["line_no"]: line["item_category"] for line in event["authorization"]["items"]}
+        )
+    return extractor.extract(items)
 
 
 def _read_csv(path: Path) -> list[dict[str, str]]:
@@ -388,6 +376,15 @@ class Command(BaseCommand):
 
     def add_arguments(self, parser) -> None:
         parser.add_argument("--scenario", dest="scenario_id", default="SCEN0000")
+        parser.add_argument(
+            "--facts",
+            dest="facts_backend",
+            default=None,
+            help=(
+                "Fact-extraction backend: stand-in, local, or hosted. Defaults to "
+                "FACTS_BACKEND. Use it to compare backends on identical input."
+            ),
+        )
 
     def handle(self, *args, **options) -> None:
         scenario_id = options["scenario_id"]
@@ -460,6 +457,11 @@ class Command(BaseCommand):
         )
         self.stdout.write("-" * 100)
 
+        extractor = build_extractor(options.get("facts_backend"))
+        self.stdout.write(f"Fact extraction: {extractor.name}")
+        self.stdout.write("-" * 100)
+
+        lines_seen = lines_with_attributes = lines_with_category = 0
         state = ReplayState.seeded(merchant_counts, device_counts)
         exit_code = 0
         for row in scenario_rows:
@@ -489,7 +491,11 @@ class Command(BaseCommand):
                 continue
 
             engine_state = state.as_engine_state()
-            result = decide(parsed, engine_state, _stand_in_facts(event_dict))
+            facts = _extract_facts(extractor, event_dict)
+            lines_seen += len(event_dict["authorization"]["items"])
+            lines_with_attributes += sum(1 for f in facts.items if f.attributes)
+            lines_with_category += sum(1 for f in facts.items if f.category)
+            result = decide(parsed, engine_state, facts)
 
             # parse_event already validated this dict; swap in the Decimal it
             # parsed so ReplayState.record carries an exact amount forward.
@@ -512,6 +518,16 @@ class Command(BaseCommand):
                 self.stdout.write(f"        - {evidence.field}: {evidence.note}")
 
         self.stdout.write("-" * 100)
+        # Extraction coverage, so a silently dead backend cannot be mistaken for a
+        # measured one: nothing read across every line means nothing was measured.
+        self.stdout.write(
+            f"Facts from {extractor.name}: {lines_with_category}/{lines_seen} lines got a "
+            f"category, {lines_with_attributes}/{lines_seen} got attributes."
+        )
+        if lines_seen and not (lines_with_attributes or lines_with_category):
+            self.stderr.write(
+                "WARNING: the extractor returned nothing for any line. Is the backend reachable?"
+            )
         self.stdout.write(
             f"Final approved total: CHF {state.approved_total_chf:.2f} across "
             f"{len(state.approved_purchases)} approved purchase(s)."
