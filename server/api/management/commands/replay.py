@@ -44,7 +44,13 @@ from django.core.management.base import BaseCommand, CommandError
 from api.services import familiarity_from_rows
 from engine.decide import decide
 from engine.parsing import EventParsingError, parse_event
-from engine.types import ApprovedPurchase, DecisionType, EngineState
+from engine.types import (
+    ApprovedPurchase,
+    DecisionType,
+    EngineState,
+    ExtractedFacts,
+    ItemFacts,
+)
 
 _SCENARIO_POLICIES: dict[str, dict[str, Any]] = {
     "SCEN0000": {
@@ -62,6 +68,10 @@ _SCENARIO_POLICIES: dict[str, dict[str, Any]] = {
             },
         ],
         "uncertainty_policy": "ask",
+        "intent_spec": {
+            "purpose": "one ordinary grocery item",
+            "allowed_item_categories": ["groceries"],
+        },
     },
     "SCEN0001": {
         "instruction": (
@@ -87,6 +97,10 @@ _SCENARIO_POLICIES: dict[str, dict[str, Any]] = {
             },
         ],
         "uncertainty_policy": "ask",
+        "intent_spec": {
+            "purpose": "household groceries for delivery",
+            "allowed_item_categories": ["groceries"],
+        },
     },
     "SCEN0002": {
         "instruction": (
@@ -104,6 +118,14 @@ _SCENARIO_POLICIES: dict[str, dict[str, Any]] = {
             },
         ],
         "uncertainty_policy": "ask",
+        "intent_spec": {
+            "purpose": "replacement road-running shoes in size 43",
+            "allowed_item_categories": ["sporting_goods"],
+            # The stand-in extractor cannot read a size out of free text, so this
+            # stays UNCERTAIN until the real extractor lands -- which is exactly
+            # the gap it is meant to make visible.
+            "required_attributes": {"size": "43"},
+        },
     },
     "SCEN0003": {
         "instruction": (
@@ -161,6 +183,29 @@ def _int_value(value: str, *, field: str) -> int:
 def _str_or_none(value: str | None) -> str | None:
     value = (value or "").strip()
     return value or None
+
+
+def _stand_in_facts(event: dict) -> ExtractedFacts:
+    """Facts built from the CSV's already-structured fields, as a placeholder.
+
+    This is NOT the real extractor and is not meant to become it. The real one
+    (see docs/NEXT-STEPS.md, P0-2) reads `item_details` and `item_name` with a
+    language model and can therefore recover attributes like a shoe size.
+
+    This stand-in only repeats `item_category`, which the merchant supplied. It
+    exists to prove the whole path works -- intent spec in, facts in, semantic
+    checks comparing, a decision out -- before any model is wired up. Because
+    it invents nothing, every attribute stays unknown, and purchases whose
+    policy requires one still resolve to `step_up`. That is the honest answer
+    and it marks precisely where the model is needed.
+    """
+    return ExtractedFacts(
+        items=tuple(
+            ItemFacts(line_no=item["line_no"], category=item["item_category"] or None)
+            for item in event["authorization"]["items"]
+        ),
+        source="csv-stand-in",
+    )
 
 
 def _read_csv(path: Path) -> list[dict[str, str]]:
@@ -303,7 +348,12 @@ def _build_event(
             "purchase_description": row["purchase_description"],
             "items": item_dicts,
         },
-        "mandate": mandate_snapshot | {"hard_rules": policy["hard_rules"]},
+        "mandate": mandate_snapshot
+        | {
+            "hard_rules": policy["hard_rules"],
+            # Caller-supplied: the live event never carries this (see types.Mandate).
+            "intent_spec": policy.get("intent_spec"),
+        },
         "context": {"approved_spend_in_period_chf": None, "recent_authorizations": []},
         "runtime": {
             "received_at": deadline_at,
@@ -439,7 +489,7 @@ class Command(BaseCommand):
                 continue
 
             engine_state = state.as_engine_state()
-            result = decide(parsed, engine_state)
+            result = decide(parsed, engine_state, _stand_in_facts(event_dict))
 
             # parse_event already validated this dict; swap in the Decimal it
             # parsed so ReplayState.record carries an exact amount forward.

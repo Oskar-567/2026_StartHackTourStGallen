@@ -172,6 +172,34 @@ class HardRule:
 
 
 @dataclass(frozen=True, slots=True)
+class IntentSpec:
+    """What the customer actually wants, in a form the engine can compare against.
+
+    Derived from the customer's own instruction by a policy compiler running
+    outside the engine, and confirmed by the customer before it takes effect.
+    It is therefore **trusted input**, unlike anything a merchant supplies.
+
+    It exists because `hard_rules` cannot express everything a person says.
+    "Buy one ordinary grocery item" is not a number comparison; it is a
+    statement about what belongs in the basket. `hard_rules` carry the numeric
+    part to the challenge API, `IntentSpec` carries the rest here.
+    """
+
+    purpose: str = ""
+    """The customer's stated purpose, for explaining decisions back to them."""
+
+    allowed_item_categories: frozenset[str] = frozenset()
+    """Item categories that belong to this purpose. Empty means "not stated",
+    which is not the same as "anything goes": `checks/purpose_fit.py` cannot
+    confirm a basket against an empty set and resolves UNCERTAIN instead."""
+
+    required_attributes: Mapping[str, str] = field(default_factory=dict)
+    """Attributes every requested item must have, e.g. `{"size": "43"}`.
+    Compared against facts extracted from merchant text -- never against the
+    merchant text itself."""
+
+
+@dataclass(frozen=True, slots=True)
 class Mandate:
     """Mirrors the event schema's `mandate` object (a run's mandate snapshot)."""
 
@@ -183,6 +211,10 @@ class Mandate:
     hard_rules: tuple[HardRule, ...]
     uncertainty_policy: Literal["ask", "decline", "approve"]
     profile_id: str
+    intent_spec: IntentSpec | None = None
+    """Set by the caller from its own records, not by the challenge API: the
+    live event's `mandate` block does not carry it. `None` means the semantic
+    checks have nothing to compare against and stay UNCERTAIN."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -331,27 +363,49 @@ class EngineState:
 
 
 @dataclass(frozen=True, slots=True)
-class ExtractedFacts:
-    """Facts about a purchase extracted by an LLM running OUTSIDE the engine.
+class ItemFacts:
+    """Structured facts about ONE cart line, read out of merchant-supplied text.
 
-    This is optional, best-effort input. When `None`, `checks/item_match.py`
-    and `checks/purpose_fit.py` must return `UNCERTAIN` -- never `PASS` --
-    because the engine has no independent way to confirm the purchase
-    matches what the customer asked for or what the merchant claims.
+    Produced outside the engine. The component that produces it reads
+    `item_name` and `item_details` -- untrusted text -- and **never sees the
+    customer's policy**. It therefore has no authority to grant anything, so
+    text saying "ignore the spending limit" is addressed to something that
+    holds no limits to ignore.
 
-    The fields below are provisional placeholders for the future
-    implementations described in those two modules; nothing reads them yet
-    beyond checking that `facts is not None`.
+    Only structured values come back: no free text, no judgements, no
+    recommendations. The comparing and the deciding happen in code, here.
     """
 
-    items_match_description: bool | None = None
-    """Whether extracted item facts (from `item_details`) are consistent
-    with the claimed `item_name` / `item_category` on the same line."""
+    line_no: int
+    """Which cart line these facts describe (`Item.line_no`)."""
 
-    item_match_notes: tuple[str, ...] = ()
+    category: str | None = None
+    """What the item actually appears to be. `None` means the extractor could
+    not tell -- which is uncertainty, never permission."""
 
-    purpose_fit_assessment: str | None = None
-    """Free-text LLM judgement of whether this purchase fits the customer's
-    stated purpose in `mandate.instruction`."""
+    attributes: Mapping[str, str] = field(default_factory=dict)
+    """Extracted attributes such as `{"size": "43", "colour": "black"}`."""
 
-    purpose_fit_confidence: float | None = None
+
+@dataclass(frozen=True, slots=True)
+class ExtractedFacts:
+    """Facts about a purchase, extracted outside the engine.
+
+    Optional, best-effort input. When `None` -- because no extractor is wired
+    up, or because the model timed out or failed -- `checks/item_match.py` and
+    `checks/purpose_fit.py` return `UNCERTAIN`, never `PASS`. That is what
+    makes the engine predictable when an external service is unavailable.
+    """
+
+    items: tuple[ItemFacts, ...] = ()
+
+    source: str = "unknown"
+    """Where these facts came from, e.g. "llm" or "csv-stand-in". Recorded in
+    evidence so a decision can say how confident its inputs were."""
+
+    def for_line(self, line_no: int) -> ItemFacts | None:
+        """Facts for one cart line, or `None` if that line was not extracted."""
+        for item in self.items:
+            if item.line_no == line_no:
+                return item
+        return None

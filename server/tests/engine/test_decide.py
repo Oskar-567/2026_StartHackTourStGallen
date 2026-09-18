@@ -49,11 +49,16 @@ def test_decide_steps_up_when_deterministic_passes_but_facts_are_missing(event_f
     )
     decision = decide(event, _clean_state())
 
-    # All deterministic checks pass, but the semantic stubs always return
-    # UNCERTAIN without ExtractedFacts, so "ask" resolves to step_up.
+    # Every deterministic check passes, but the basket cannot be confirmed
+    # against a purpose the mandate never states, so "ask" resolves to step_up.
     assert decision.decision == DecisionType.STEP_UP
-    assert ITEM_MATCH_FACTS_UNAVAILABLE in decision.reason_codes
     assert PURPOSE_FIT_FACTS_UNAVAILABLE in decision.reason_codes
+    # item_match stays silent here, and the asymmetry with purpose_fit is
+    # deliberate: a mandate with no required attributes has named nothing for
+    # item_match to check, while purpose_fit genuinely cannot tell whether
+    # something unrequested is in the basket without knowing what was
+    # requested. Absent categories mean an incomplete policy, not a free pass.
+    assert ITEM_MATCH_FACTS_UNAVAILABLE not in decision.reason_codes
 
 
 def test_decide_approves_when_uncertainty_policy_is_approve(event_factory):
