@@ -18,7 +18,9 @@ node_modules/
 .DS_Store
 Thumbs.db
 .idea/
-docs/
 
 # Claude Code (local settings only)
 .claude/settings.local.json
+/docs/superpowers/
+/docs/HACKATHON-SETUP-GUIDE.md
+/docs/TEARDOWN.md
