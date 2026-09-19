@@ -342,6 +342,16 @@ a rule, or a decision path.
 The structural defence, as described in [section 4.3](#43-the-facts--what-an-ai-extracted-optional),
 is that the component which reads shop text has no authority to grant anything.
 
+On top of that, `checks/injection.py` *notices* when shop text is written to an
+automated reader rather than to a buyer -- role markers ("System: ..."), "ignore
+... instructions/limits", claims that the customer pre-authorised the shop,
+demands to approve without checks. It never lets that text decide anything: it
+adds `merchant_text_instruction` with the offending sentence quoted as evidence
+and returns UNCERTAIN, so the customer sees what the shop tried. A purchase that
+breaks a rule is still declined on that rule. Patterns describe kinds of
+instruction, not sentences from the practice data; across all 215 merchant texts
+in the data pack they match exactly the two planted injections.
+
 ### 8.4 The engine must not know which test it is taking
 
 The practice data contains five named scenarios. It would be trivially easy — and

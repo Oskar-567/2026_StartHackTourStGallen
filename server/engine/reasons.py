@@ -36,6 +36,9 @@ MERCHANT_UNFAMILIAR = "merchant_unfamiliar"
 MERCHANT_COUNTRY_UNFAMILIAR = "merchant_country_unfamiliar"
 MERCHANT_LOOKALIKE_NAME = "merchant_lookalike_name"
 
+# -- checks/injection.py --
+MERCHANT_TEXT_INSTRUCTION = "merchant_text_instruction"
+
 # -- checks/session.py --
 SESSION_NEW_DEVICE = "session_new_device"
 SESSION_VELOCITY_HIGH = "session_velocity_high"

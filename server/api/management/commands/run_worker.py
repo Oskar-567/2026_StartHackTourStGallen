@@ -5,7 +5,7 @@ Outline (mirrors `technical_details.md` step 6, "Prepare your worker, then
 start a run"):
 
     while the run has work remaining:
-        poll GET /v1/decision-requests/next?wait=25
+        poll GET /v1/decision-requests/next?wait=POLL_WAIT_SECONDS
         204 -> check run progress, keep polling
         error -> handled before reading any purchase data
         validate the envelope's `data` against the event schema
@@ -33,6 +33,7 @@ from __future__ import annotations
 import logging
 import sys
 import time
+from datetime import timedelta
 
 from django.conf import settings
 from django.core.management.base import BaseCommand, CommandError
@@ -51,7 +52,12 @@ from viseca.client import VisecaAPIError, VisecaConnectionError
 
 logger = logging.getLogger("viseca.worker")
 
-POLL_WAIT_SECONDS = 25
+#: Long-poll wait. Short on purpose: customer answers are forwarded between
+#: polls, so this is the worst-case delay before a step-up answer reaches the
+#: API -- and the human window is only 120s. A 25s wait once let an answer given
+#: with 17s to spare arrive after the window closed. Purchases are unaffected:
+#: the API returns as soon as one is queued, whatever the wait.
+POLL_WAIT_SECONDS = 2
 #: Minimum real-clock seconds before `deadline_at` required to run the full
 #: (deterministic + semantic) engine. Below this, the watchdog submits the
 #: deterministic tier's own verdict instead of risking the 8s deadline.
@@ -59,6 +65,8 @@ WATCHDOG_MARGIN_SECONDS = 2.0
 #: When a poll or a network call fails outright, back off briefly before
 #: retrying rather than spinning a hot loop against a down API.
 ERROR_BACKOFF_SECONDS = 1.0
+#: Run statuses after which no further purchases will arrive.
+RUN_FINISHED_STATUSES = frozenset({"completed", "failed", "cancelled", "expired"})
 
 
 def _configure_logging() -> None:
@@ -176,23 +184,36 @@ class Command(BaseCommand):
             mandate=mandate,
             status=Run.Status.RUNNING,
             started_at=timezone.now(),
-            event_counters=response.get("event_counters", {}) or {},
+            event_counters=response.get("counters", {}) or {},
         )
 
     def _run_finished(self, client, run: Run) -> bool:
+        """Whether the challenge API reports the run as over.
+
+        `GET /v1/scenario-runs/{id}` returns `status` ("completed" when every
+        purchase is settled, including step-ups the customer answered or that
+        timed out) and `counters` (`total_events`, `remaining`, `pending`,
+        `awaiting_customer`, ...). Either signal ends the loop.
+        """
         try:
             data = client.get_scenario_run(run.run_id) or {}
         except (VisecaAPIError, VisecaConnectionError) as exc:
             logger.warning("run_progress_check_failed run_id=%s error=%s", run.run_id, exc)
             return False
-        counters = data.get("event_counters", data) or {}
+        counters = data.get("counters") or {}
         run.event_counters = counters
         run.save(update_fields=["event_counters"])
-        total = counters.get("events_total")
-        processed = counters.get("events_processed")
-        finished = total is not None and processed is not None and processed >= total
+        settled = (
+            bool(counters)
+            and counters.get("remaining") == 0
+            and counters.get("pending") == 0
+            and counters.get("awaiting_customer") == 0
+        )
+        finished = data.get("status") in RUN_FINISHED_STATUSES or settled
         if finished and run.status == Run.Status.RUNNING:
-            run.status = Run.Status.COMPLETED
+            run.status = (
+                Run.Status.FAILED if data.get("status") == "failed" else Run.Status.COMPLETED
+            )
             run.finished_at = timezone.now()
             run.save(update_fields=["status", "finished_at"])
         return finished
@@ -390,8 +411,13 @@ class Command(BaseCommand):
     # -- customer resolutions --------------------------------------------
 
     def _forward_pending_resolutions(self, client) -> None:
+        # An answer older than the human window can no longer be accepted by the
+        # API; retrying it every cycle would only fill the log.
+        window_start = timezone.now() - timedelta(seconds=services.HUMAN_WINDOW_SECONDS)
         pending = Decision.objects.filter(
-            source=Decision.Source.CUSTOMER, forwarded_at__isnull=True
+            source=Decision.Source.CUSTOMER,
+            forwarded_at__isnull=True,
+            created_at__gte=window_start,
         ).exclude(authorization__run__run_id__startswith=services.DEMO_RUN_PREFIX)
         for decision in pending:
             try:
@@ -400,3 +426,9 @@ class Command(BaseCommand):
                 logger.warning(
                     "forward_resolution_failed decision_id=%s error=%s", decision.pk, exc
                 )
+                continue
+            logger.info(
+                "resolution_forwarded authorization_id=%s decision=%s",
+                decision.authorization.authorization_id,
+                decision.decision,
+            )

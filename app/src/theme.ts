@@ -24,33 +24,19 @@ export const colors = {
   attentionSurface: "#FFF4DE",
   onAttentionSurface: "#7A4A00",
   scrim: "rgba(0, 0, 0, 0.4)",
-  // The payment card on the home screen: deep navy face, soft highlight, chip gold.
-  cardFace: "#0B2350",
-  cardFaceHighlight: "#1D3F7A",
-  cardChip: "#D9B45A",
-  // Quick actions and list icons sit in pale circles.
-  iconCircle: "#E9EDF5",
-  onIconCircle: "#0B2350",
-  // Bottom tab bar.
-  tabBar: "#FFFFFF",
-  tabActive: "#0B2350",
-  tabInactive: "#8E8E93",
-  badge: "#C4152A",
-  onBadge: "#FFFFFF",
 } as const;
 
-export const radius = { card: 16, pill: 999, chip: 12, sheet: 24, paymentCard: 20 } as const;
+export const radius = { card: 16, pill: 999, chip: 12, sheet: 24 } as const;
 
 export const spacing = { xs: 4, sm: 8, md: 12, lg: 16, xl: 24 } as const;
 
 export const type = {
-  largeTitle: { fontSize: 30, fontWeight: "500", color: colors.text },
-  sectionTitle: { fontSize: 20, fontWeight: "500", color: colors.text },
-  amountLarge: { fontSize: 34, fontWeight: "600", color: colors.text },
-  amount: { fontSize: 22, fontWeight: "600", color: colors.text },
-  body: { fontSize: 16, color: colors.text },
-  secondary: { fontSize: 14, color: colors.textMuted },
-  small: { fontSize: 13, color: colors.textMuted },
+  largeTitle: { fontSize: 34, fontWeight: "500", color: colors.text },
+  sectionTitle: { fontSize: 22, fontWeight: "500", color: colors.text },
+  amount: { fontSize: 24, fontWeight: "600", color: colors.text },
+  body: { fontSize: 18, color: colors.text },
+  secondary: { fontSize: 16, color: colors.textMuted },
+  small: { fontSize: 15, color: colors.textMuted },
 } as const;
 
 /** Swiss formatting: `CHF 1'234.50`. */

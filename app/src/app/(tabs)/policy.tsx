@@ -5,13 +5,12 @@ import {
   Card,
   Chip,
   ConfirmSheet,
-  ListRow,
+  HeroCard,
+  LargeTitle,
   Loading,
   Notice,
-  PaymentCard,
   PillButton,
   Screen,
-  ScreenHeader,
   SectionTitle,
 } from "@/components/ui";
 import {
@@ -78,7 +77,7 @@ export default function PolicyScreen() {
   if (state.kind === "loading") {
     return (
       <Screen>
-        <ScreenHeader eyebrow="Shopping agent" title="Wallet policy" />
+        <LargeTitle>Wallet policy</LargeTitle>
         <Loading />
       </Screen>
     );
@@ -87,7 +86,7 @@ export default function PolicyScreen() {
   if (state.kind === "failed") {
     return (
       <Screen>
-        <ScreenHeader eyebrow="Shopping agent" title="Wallet policy" />
+        <LargeTitle>Wallet policy</LargeTitle>
         <Card>
           <Text style={type.body}>Could not load your policy.</Text>
           <Text style={type.small}>{state.message}</Text>
@@ -107,7 +106,7 @@ export default function PolicyScreen() {
   if (state.mandates.length === 0) {
     return (
       <Screen>
-        <ScreenHeader eyebrow="Shopping agent" title="Wallet policy" />
+        <LargeTitle>Wallet policy</LargeTitle>
         <Card>
           <Text style={type.body}>No wallet policy yet.</Text>
         </Card>
@@ -122,18 +121,16 @@ export default function PolicyScreen() {
 
   return (
     <Screen>
-      <ScreenHeader eyebrow="Shopping agent" title="Wallet policy" />
+      <LargeTitle>Wallet policy</LargeTitle>
 
-      <PaymentCard
-        label="Limit per purchase"
-        value={limit !== null ? formatChf(limit) : "No limit"}
-        caption="•••• AGENT"
-        status={<StatusChip status={mandate.status} />}
-      />
-
-      <Card style={styles.listCard}>
-        <ListRow icon="shield" title={UNCERTAINTY_DESCRIPTIONS[mandate.uncertainty_policy]} />
-      </Card>
+      <HeroCard>
+        <View style={styles.heroTop}>
+          <Text style={styles.heroLabel}>Limit per purchase</Text>
+          <StatusChip status={mandate.status} />
+        </View>
+        <Text style={styles.heroValue}>{limit !== null ? formatChf(limit) : "No limit"}</Text>
+        <Text style={styles.heroDetail}>{UNCERTAINTY_DESCRIPTIONS[mandate.uncertainty_policy]}</Text>
+      </HeroCard>
 
       {feedback && <Notice tone={feedback.tone}>{feedback.text}</Notice>}
 
@@ -158,15 +155,17 @@ export default function PolicyScreen() {
       </Card>
 
       <SectionTitle>What the wallet enforces</SectionTitle>
-      <Card style={styles.listCard}>
+      <Card>
         {mandate.hard_rules.length === 0 ? (
-          <Text style={[type.secondary, styles.rulesEmpty]}>No fixed rules.</Text>
+          <Text style={type.secondary}>No fixed rules.</Text>
         ) : (
           mandate.hard_rules.map((rule, index) => (
-            <ListRow key={index} icon="rule" title={describeRule(rule)} divider={index > 0} />
+            <View key={index} style={[styles.rule, index > 0 && styles.ruleDivider]}>
+              <Text style={type.body}>{describeRule(rule)}</Text>
+            </View>
           ))
         )}
-        <Text style={[type.small, styles.rulesNote]}>
+        <Text style={type.small}>
           Checked on every purchase, together with what you asked for and whether the shop and
           item match it.
         </Text>
@@ -356,20 +355,23 @@ function TightenPanel({
 }
 
 const styles = StyleSheet.create({
-  listCard: { paddingVertical: spacing.xs },
-  quote: { fontSize: 17, fontStyle: "italic", color: colors.text, lineHeight: 24 },
-  rulesEmpty: { paddingVertical: spacing.md },
-  rulesNote: { paddingBottom: spacing.md },
+  heroTop: { flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
+  heroLabel: { fontSize: 20, fontWeight: "500", color: colors.onHero },
+  heroValue: { fontSize: 40, fontWeight: "600", color: colors.onHero },
+  heroDetail: { fontSize: 17, color: colors.onHeroMuted },
+  quote: { fontSize: 19, fontStyle: "italic", color: colors.text, lineHeight: 27 },
+  rule: { paddingVertical: spacing.sm },
+  ruleDivider: { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.border },
   questions: { backgroundColor: colors.attentionSurface },
   panel: { gap: spacing.md },
   row: { flexDirection: "row", gap: spacing.sm, alignItems: "center" },
   input: {
     flex: 1,
-    minHeight: 48,
+    minHeight: 52,
     backgroundColor: colors.surfaceRaised,
     borderRadius: radius.chip,
     paddingHorizontal: spacing.lg,
-    fontSize: 16,
+    fontSize: 18,
     color: colors.text,
   },
   meta: { ...type.small, textAlign: "center" },

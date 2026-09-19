@@ -20,7 +20,7 @@ def mock_client(monkeypatch) -> MagicMock:
 
 @pytest.mark.django_db
 def test_creates_and_confirms_the_reference_policy_with_its_intent_spec(mock_client):
-    call_command("create_mandate", scenario="SCEN0002")
+    call_command("create_mandate", "--scenario", "SCEN0002")
 
     mandate = Mandate.objects.get()
     policy = REFERENCE_POLICIES["SCEN0002"]
@@ -36,7 +36,7 @@ def test_creates_and_confirms_the_reference_policy_with_its_intent_spec(mock_cli
 
 @pytest.mark.django_db
 def test_draft_only_leaves_confirmation_to_the_customer(mock_client):
-    call_command("create_mandate", scenario="SCEN0002", draft_only=True)
+    call_command("create_mandate", "--scenario", "SCEN0002", "--draft-only")
 
     assert Mandate.objects.get().status == Mandate.Status.DRAFT
     mock_client.confirm_mandate.assert_not_called()
@@ -48,9 +48,9 @@ def test_an_api_rejection_is_a_readable_error(mock_client):
         422, {"error": "bad rule"}, method="POST", path="/v1/mandates"
     )
     with pytest.raises(CommandError, match="bad rule"):
-        call_command("create_mandate", scenario="SCEN0002")
+        call_command("create_mandate", "--scenario", "SCEN0002")
 
 
 def test_an_unknown_scenario_is_refused():
     with pytest.raises(CommandError, match="No reference policy"):
-        call_command("create_mandate", scenario="SCEN9999")
+        call_command("create_mandate", "--scenario", "SCEN9999")

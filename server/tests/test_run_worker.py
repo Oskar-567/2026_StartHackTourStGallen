@@ -242,3 +242,64 @@ def test_worker_skips_extraction_when_it_could_not_finish_in_time(monkeypatch, s
 
     assert command._extractor.calls == 0
     assert client.submit_decision.call_count == 1
+
+
+@pytest.mark.django_db
+def test_run_counts_as_finished_when_the_api_says_completed():
+    """Shape as returned by the live API on 2026-09-19 for a completed SCEN0000 run."""
+    run = make_run(mandate=make_mandate(mandate_id="TM1", status="active"), run_id="run-done")
+    client = MagicMock()
+    client.get_scenario_run.return_value = {
+        "run_id": "run-done",
+        "status": "completed",
+        "counters": {
+            "total_events": 1,
+            "generated": 1,
+            "remaining": 0,
+            "pending": 0,
+            "awaiting_customer": 0,
+            "approved": 1,
+        },
+    }
+
+    assert Command()._run_finished(client, run) is True
+    run.refresh_from_db()
+    assert run.status == "completed"
+    assert run.event_counters["approved"] == 1
+
+
+@pytest.mark.django_db
+def test_run_is_not_finished_while_a_customer_answer_is_outstanding():
+    run = make_run(mandate=make_mandate(mandate_id="TM1", status="active"), run_id="run-open")
+    client = MagicMock()
+    client.get_scenario_run.return_value = {
+        "status": "running",
+        "counters": {"total_events": 1, "remaining": 0, "pending": 0, "awaiting_customer": 1},
+    }
+
+    assert Command()._run_finished(client, run) is False
+
+
+@pytest.mark.django_db
+def test_worker_forwards_a_fresh_customer_answer_and_skips_an_expired_one():
+    from django.utils import timezone
+
+    from tests.factories import make_authorization
+
+    fresh = make_authorization(authorization_id="AU_FRESH")
+    stale = make_authorization(authorization_id="AU_STALE")
+    Decision.objects.create(
+        authorization=fresh, decision="approve", source=Decision.Source.CUSTOMER
+    )
+    old = Decision.objects.create(
+        authorization=stale, decision="approve", source=Decision.Source.CUSTOMER
+    )
+    Decision.objects.filter(pk=old.pk).update(
+        created_at=timezone.now() - timedelta(seconds=services.HUMAN_WINDOW_SECONDS + 10)
+    )
+    client = MagicMock()
+
+    Command()._forward_pending_resolutions(client)
+
+    forwarded = [call.args[0] for call in client.resolve.call_args_list]
+    assert forwarded == ["AU_FRESH"]

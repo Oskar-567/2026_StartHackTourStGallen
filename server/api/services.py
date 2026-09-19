@@ -62,6 +62,11 @@ def event_payload(raw_event: dict) -> dict:
     return data if isinstance(data, dict) else raw_event
 
 
+#: How long the customer has to answer a step-up: the challenge API's default
+#: human window (`/v1/bootstrap` -> `timeouts.human_timeout_seconds`), distinct
+#: from `deadline_at`, the ~8s automated deadline.
+HUMAN_WINDOW_SECONDS = 120
+
 #: Run IDs created locally by `replay --seed-queue` to try the approval queue.
 #: They never existed at the challenge API, so nothing about them is forwarded.
 DEMO_RUN_PREFIX = "demo-"

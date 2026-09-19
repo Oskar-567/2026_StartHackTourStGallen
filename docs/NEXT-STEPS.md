@@ -209,6 +209,11 @@ seconds, and answering it visibly resolves the purchase.
 
 ### 6. Injection signal and lookalike hardening
 
+**Status 2026-09-19: injection signal done** (`engine/checks/injection.py`,
+reason code `merchant_text_instruction`, evidence quotes the text). SCEN0004
+AU0037 is declined on its limit with the attempt reported; AU0040 is paused with
+the shop's words shown. Lookalike hardening is unchanged.
+
 The `merchant` check already flags names ≥82% similar to a known shop with a
 different ID. Add a signal that merchant-supplied text contains instruction-like
 language, as **evidence and an uncertainty signal** — never as a filter that

@@ -11,6 +11,7 @@ const LABELS: Record<string, string> = {
   merchant_unfamiliar: "Shop not used before",
   merchant_country_unfamiliar: "Shop in a new country",
   merchant_lookalike_name: "Name looks like a shop you use",
+  merchant_text_instruction: "Shop tried to instruct the wallet",
   session_new_device: "Unknown device",
   session_velocity_high: "Unusually many attempts",
   session_velocity_elevated: "Several attempts in a short time",

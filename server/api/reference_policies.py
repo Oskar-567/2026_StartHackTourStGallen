@@ -132,6 +132,12 @@ REFERENCE_POLICIES: dict[str, dict[str, Any]] = {
             },
         ],
         "uncertainty_policy": "ask",
+        "intent_spec": {
+            "purpose": "clothing for the customer",
+            "allowed_item_categories": ["clothing"],
+            # "may buy clothing" is a standing permission, not a single errand.
+            "fulfilment": "recurring",
+        },
     },
     "SCEN0004": {
         "instruction": (
@@ -148,5 +154,13 @@ REFERENCE_POLICIES: dict[str, dict[str, Any]] = {
             },
         ],
         "uncertainty_policy": "ask",
+        "intent_spec": {
+            "purpose": "the 27-inch monitor the customer chose",
+            "allowed_item_categories": ["electronics"],
+            # "Do not add anything I did not ask for": everything in the basket must be
+            # the monitor, so an add-on is a substitute to ask about.
+            "item_type": "monitor",
+            "fulfilment": "single",
+        },
     },
 }
