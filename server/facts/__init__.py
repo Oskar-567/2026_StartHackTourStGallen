@@ -17,9 +17,11 @@ evidence so a decision can say where its inputs came from.
 from __future__ import annotations
 
 import logging
+from typing import Any
 
 from django.conf import settings
 
+from engine.types import ExtractedFacts
 from facts.base import ExtractionItem, FactExtractor, items_from_event
 from facts.stand_in import StandInExtractor
 
@@ -30,8 +32,24 @@ __all__ = [
     "FactExtractor",
     "StandInExtractor",
     "build_extractor",
+    "extract_for_event",
     "items_from_event",
 ]
+
+
+def extract_for_event(extractor: FactExtractor, event: dict[str, Any]) -> ExtractedFacts:
+    """Run `extractor` over one raw event's cart lines.
+
+    The stand-in is a special case: it reports the merchant's own structured
+    `item_category` rather than reading text, so it needs those categories
+    handed to it. Every model-backed extractor gets the text only.
+    """
+    items = items_from_event(event)
+    if isinstance(extractor, StandInExtractor):
+        extractor = StandInExtractor(
+            {line["line_no"]: line["item_category"] for line in event["authorization"]["items"]}
+        )
+    return extractor.extract(items)
 
 
 def build_extractor(backend: str | None = None) -> FactExtractor:

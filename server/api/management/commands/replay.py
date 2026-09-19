@@ -31,6 +31,7 @@ from __future__ import annotations
 
 import csv
 import sys
+import time
 from collections import defaultdict
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
@@ -45,8 +46,7 @@ from api.services import familiarity_from_rows
 from engine.decide import decide
 from engine.parsing import EventParsingError, parse_event
 from engine.types import ApprovedPurchase, DecisionType, EngineState
-from facts import build_extractor, items_from_event
-from facts.stand_in import StandInExtractor
+from facts import build_extractor, extract_for_event
 
 _SCENARIO_POLICIES: dict[str, dict[str, Any]] = {
     "SCEN0000": {
@@ -206,21 +206,6 @@ def _int_value(value: str, *, field: str) -> int:
 def _str_or_none(value: str | None) -> str | None:
     value = (value or "").strip()
     return value or None
-
-
-def _extract_facts(extractor, event: dict):
-    """Run the configured extractor over this purchase's cart lines.
-
-    The stand-in is a special case: it reports the merchant's own structured
-    `item_category` rather than reading text, so it needs those categories
-    handed to it. Every model-backed extractor gets the text only.
-    """
-    items = items_from_event(event)
-    if isinstance(extractor, StandInExtractor):
-        extractor = StandInExtractor(
-            {line["line_no"]: line["item_category"] for line in event["authorization"]["items"]}
-        )
-    return extractor.extract(items)
 
 
 def _read_csv(path: Path) -> list[dict[str, str]]:
@@ -496,6 +481,7 @@ class Command(BaseCommand):
         self.stdout.write("-" * 100)
 
         lines_seen = lines_with_attributes = lines_with_category = 0
+        extraction_seconds: list[float] = []
         state = ReplayState.seeded(merchant_counts, device_counts)
         exit_code = 0
         for row in scenario_rows:
@@ -525,7 +511,9 @@ class Command(BaseCommand):
                 continue
 
             engine_state = state.as_engine_state()
-            facts = _extract_facts(extractor, event_dict)
+            started = time.monotonic()
+            facts = extract_for_event(extractor, event_dict)
+            extraction_seconds.append(time.monotonic() - started)
             lines_seen += len(event_dict["authorization"]["items"])
             lines_with_attributes += sum(1 for f in facts.items if f.attributes)
             lines_with_category += sum(1 for f in facts.items if f.category)
@@ -547,7 +535,9 @@ class Command(BaseCommand):
                     state.approved_total_chf,
                 )
             )
-            self.stdout.write(f"      {result.customer_message}")
+            self.stdout.write(
+                f"      {result.customer_message}  [facts {extraction_seconds[-1]:.2f}s]"
+            )
             for evidence in result.evidence:
                 self.stdout.write(f"        - {evidence.field}: {evidence.note}")
 
@@ -558,6 +548,14 @@ class Command(BaseCommand):
             f"Facts from {extractor.name}: {lines_with_category}/{lines_seen} lines got a "
             f"category, {lines_with_attributes}/{lines_seen} got attributes."
         )
+        if extraction_seconds:
+            # The number to hold against the decision deadline: the worst case,
+            # not the average, is what misses it.
+            self.stdout.write(
+                f"Extraction time: max {max(extraction_seconds):.2f}s, "
+                f"mean {sum(extraction_seconds) / len(extraction_seconds):.2f}s "
+                f"(timeout {settings.FACTS_TIMEOUT_SECONDS:g}s)."
+            )
         if lines_seen and not (lines_with_attributes or lines_with_category):
             self.stderr.write(
                 "WARNING: the extractor returned nothing for any line. Is the backend reachable?"

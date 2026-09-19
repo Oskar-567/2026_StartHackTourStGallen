@@ -15,6 +15,7 @@ import pytest
 from api import services
 from api.management.commands.run_worker import Command
 from api.models import AuthorizationRecord, Decision
+from engine.types import ExtractedFacts, ItemFacts
 from tests.factories import make_mandate, make_run
 
 
@@ -168,4 +169,76 @@ def test_watchdog_submits_deterministic_only_decision_when_margin_is_tight(monke
         Decision.Value.DECLINE,
         Decision.Value.STEP_UP,
     }
+    assert client.submit_decision.call_count == 1
+
+
+class _RecordingExtractor:
+    """Returns fixed facts and remembers whether it was asked."""
+
+    name = "test-extractor"
+
+    def __init__(self, attributes: dict[str, str]) -> None:
+        self.calls = 0
+        self._attributes = attributes
+
+    def extract(self, items):
+        self.calls += 1
+        return ExtractedFacts(
+            items=tuple(
+                ItemFacts(
+                    line_no=item.line_no,
+                    category="groceries",
+                    category_verified=True,
+                    attributes=self._attributes,
+                )
+                for item in items
+            ),
+            source=self.name,
+        )
+
+
+def _deadline_in(seconds: float) -> str:
+    return (datetime.now(UTC) + timedelta(seconds=seconds)).isoformat().replace("+00:00", "Z")
+
+
+@pytest.mark.django_db
+def test_worker_decides_with_the_local_intent_spec_and_extracted_facts(monkeypatch):
+    """The API's mandate carries no intent_spec; the worker must add ours and read facts."""
+    monkeypatch.setattr(services, "_history_rows_cache", [])
+    mandate = make_mandate(
+        mandate_id="TM1",
+        status="active",
+        intent_spec={
+            "allowed_item_categories": ["groceries"],
+            "required_attributes": {"size": "L"},
+        },
+    )
+    run = make_run(mandate=mandate, run_id="run-facts")
+    client = MagicMock()
+    client.submit_decision.return_value = {"status": "accepted"}
+
+    command = Command()
+    command._extractor = _RecordingExtractor({"size": "S"})
+    command._handle_envelope(client, _envelope(run.run_id, "AU_LIVE_FACTS", _deadline_in(120)))
+
+    decision = Decision.objects.get(source=Decision.Source.ENGINE)
+    assert command._extractor.calls == 1
+    assert decision.decision == Decision.Value.DECLINE
+    assert "item_match_attribute_mismatch" in decision.reason_codes
+
+
+@pytest.mark.django_db
+def test_worker_skips_extraction_when_it_could_not_finish_in_time(monkeypatch, settings):
+    monkeypatch.setattr(services, "_history_rows_cache", [])
+    settings.FACTS_TIMEOUT_SECONDS = 4
+    run = make_run(mandate=make_mandate(mandate_id="TM1", status="active"), run_id="run-skip")
+    client = MagicMock()
+    client.submit_decision.return_value = {"status": "accepted"}
+
+    command = Command()
+    command._extractor = _RecordingExtractor({})
+    # Past the watchdog margin, but short of watchdog margin + extraction timeout.
+    command._handle_envelope(client, _envelope(run.run_id, "AU_LIVE_SKIP", _deadline_in(4)))
+
+    assert command._extractor.calls == 0
     assert client.submit_decision.call_count == 1

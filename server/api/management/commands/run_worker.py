@@ -21,6 +21,11 @@ Non-negotiable watchdog: if there is not enough real-clock margin left
 before `deadline_at` to safely run the full engine, submit the best decision
 available from the deterministic tier alone (no semantic/LLM tier) rather
 than risk missing the deadline.
+
+Fact extraction (`FACTS_BACKEND`) runs before `decide()` only when the margin
+covers its whole timeout plus the watchdog margin; otherwise the engine decides
+without facts, which makes the semantic checks ask rather than guess. The model
+is warmed at startup so the first purchase does not pay the model load.
 """
 
 from __future__ import annotations
@@ -29,6 +34,7 @@ import logging
 import sys
 import time
 
+from django.conf import settings
 from django.core.management.base import BaseCommand, CommandError
 from django.utils import timezone
 
@@ -38,8 +44,9 @@ from engine.aggregate import combine
 from engine.checks import DETERMINISTIC_CHECKS
 from engine.decide import ENGINE_VERSION, decide
 from engine.parsing import EventParsingError, parse_event
-from engine.types import AuthorizationEvent, EngineState
+from engine.types import AuthorizationEvent, EngineState, ExtractedFacts
 from engine.types import Decision as EngineDecision
+from facts import FactExtractor, build_extractor, extract_for_event
 from viseca.client import VisecaAPIError, VisecaConnectionError
 
 logger = logging.getLogger("viseca.worker")
@@ -94,6 +101,14 @@ class Command(BaseCommand):
         # same run_id don't need a DB lookup every time. None until `handle()`
         # starts a run, or a test calls `_handle_envelope`/`_reconcile` directly.
         self._run: Run | None = None
+        # Built on first use so tests that drive `_handle_envelope` directly get
+        # the configured backend too; `handle()` builds and warms it up front.
+        self._extractor: FactExtractor | None = None
+
+    def _get_extractor(self) -> FactExtractor:
+        if self._extractor is None:
+            self._extractor = build_extractor()
+        return self._extractor
 
     def add_arguments(self, parser) -> None:
         parser.add_argument(
@@ -128,6 +143,11 @@ class Command(BaseCommand):
                     f"Mandate {mandate_pk} is not active (status={mandate.status!r})."
                 )
             self._run = self._start_run(client, scenario_id, mandate)
+
+        extractor = self._get_extractor()
+        warm_up = getattr(extractor, "warm_up", None)
+        warmed = warm_up() if callable(warm_up) else None
+        logger.info("facts_backend=%s warm_up=%s", extractor.name, warmed)
 
         logger.info("worker_starting run_id=%s", self._run.run_id if self._run else "<resuming>")
 
@@ -208,17 +228,19 @@ class Command(BaseCommand):
             logger.error("envelope_missing_data run_id=%s", run_id)
             return
 
-        try:
-            parsed = parse_event(event_dict)
-        except EventParsingError as exc:
-            logger.error("event_parse_failed run_id=%s error=%s", run_id, exc)
-            return
-
         run = self._resolve_run(run_id)
         if run is None:
             logger.error(
-                "unknown_run run_id=%s authorization_id=%s", run_id, parsed.authorization_id
+                "unknown_run run_id=%s authorization_id=%s",
+                run_id,
+                envelope.get("authorization_id"),
             )
+            return
+
+        try:
+            parsed = parse_event(services.with_intent_spec(event_dict, run))
+        except EventParsingError as exc:
+            logger.error("event_parse_failed run_id=%s error=%s", run_id, exc)
             return
 
         existing = AuthorizationRecord.objects.filter(
@@ -257,7 +279,11 @@ class Command(BaseCommand):
                 authorization.authorization_id,
             )
             try:
-                parsed = parse_event(services.event_payload(authorization.raw_event))
+                parsed = parse_event(
+                    services.with_intent_spec(
+                        services.event_payload(authorization.raw_event), authorization.run
+                    )
+                )
             except EventParsingError as exc:
                 logger.error(
                     "reconcile_reparse_failed authorization_id=%s error=%s",
@@ -306,7 +332,8 @@ class Command(BaseCommand):
                 )
                 engine_decision = _deterministic_only_decision(event, state)
             else:
-                engine_decision = decide(event, state)
+                facts = self._extract_within_deadline(authorization, margin)
+                engine_decision = decide(event, state, facts)
         except Exception:  # noqa: BLE001 - the engine must never leave a purchase unanswered
             logger.exception("engine_raised authorization_id=%s", authorization.authorization_id)
             engine_decision = _fallback_step_up(event)
@@ -325,6 +352,40 @@ class Command(BaseCommand):
             engine_decision.decision.value,
             list(engine_decision.reason_codes),
         )
+
+    def _extract_within_deadline(
+        self, authorization: AuthorizationRecord, margin: float
+    ) -> ExtractedFacts | None:
+        """Facts for this purchase, or None when there is no time or it failed.
+
+        Runs only if the extractor's full timeout still leaves the watchdog
+        margin -- a slow model must never be the reason a deadline is missed.
+        None is safe: the semantic checks then return UNCERTAIN.
+        """
+        budget = margin - WATCHDOG_MARGIN_SECONDS
+        if budget < settings.FACTS_TIMEOUT_SECONDS:
+            logger.warning(
+                "facts_skipped authorization_id=%s margin=%.2fs",
+                authorization.authorization_id,
+                margin,
+            )
+            return None
+        extractor = self._get_extractor()
+        started = time.monotonic()
+        try:
+            facts = extract_for_event(extractor, services.event_payload(authorization.raw_event))
+        except Exception:  # noqa: BLE001 - extraction must never block a decision
+            logger.exception("facts_failed authorization_id=%s", authorization.authorization_id)
+            return None
+        logger.info(
+            "facts authorization_id=%s source=%s lines_read=%d/%d elapsed=%.2fs",
+            authorization.authorization_id,
+            facts.source,
+            sum(1 for item in facts.items if item.category or item.attributes),
+            len(services.event_payload(authorization.raw_event)["authorization"]["items"]),
+            time.monotonic() - started,
+        )
+        return facts
 
     # -- customer resolutions --------------------------------------------
 

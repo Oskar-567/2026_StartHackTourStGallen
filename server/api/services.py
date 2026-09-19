@@ -62,6 +62,22 @@ def event_payload(raw_event: dict) -> dict:
     return data if isinstance(data, dict) else raw_event
 
 
+def with_intent_spec(event: dict, run: Run) -> dict:
+    """The event with the run's confirmed `intent_spec` attached to its mandate.
+
+    The challenge API stores only `hard_rules` and `uncertainty_policy`; the
+    semantic half of the customer's policy (purpose, required attributes, item
+    type) lives in our own `Mandate` row. Without it the semantic checks have
+    nothing to compare against and every purchase becomes a question.
+
+    Returns a copy: the stored `raw_event` stays exactly what the API sent.
+    """
+    intent_spec = run.mandate.intent_spec
+    if not intent_spec:
+        return event
+    return {**event, "mandate": {**event.get("mandate", {}), "intent_spec": intent_spec}}
+
+
 def _authorization_payload(raw_event: dict) -> dict:
     return event_payload(raw_event).get("authorization", {}) or {}
 
