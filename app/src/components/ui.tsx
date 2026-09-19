@@ -402,7 +402,7 @@ const styles = StyleSheet.create({
   },
   badgeText: { color: colors.onBadge, fontSize: 11, fontWeight: "700" },
   back: { flexDirection: "row", alignItems: "center", gap: 2, alignSelf: "flex-start" },
-  backText: { fontSize: 16, color: colors.link },
+  backText: { fontSize: 18, color: colors.link },
   paymentCard: {
     backgroundColor: colors.cardFace,
     borderRadius: radius.paymentCard,
@@ -425,7 +425,7 @@ const styles = StyleSheet.create({
   paymentCardTop: { flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
   cardChip: { width: 40, height: 30, borderRadius: 6, backgroundColor: colors.cardChip },
   paymentCardBody: { gap: 2 },
-  paymentCardLabel: { fontSize: 14, color: colors.onHeroMuted },
+  paymentCardLabel: { fontSize: 16, color: colors.onHeroMuted },
   paymentCardValue: { fontSize: 32, fontWeight: "600", color: colors.onHero },
   paymentCardBottom: {
     flexDirection: "row",
@@ -435,7 +435,7 @@ const styles = StyleSheet.create({
   },
   paymentCardCaption: {
     flex: 1,
-    fontSize: 15,
+    fontSize: 17,
     letterSpacing: 2,
     color: colors.onHero,
   },
@@ -449,7 +449,7 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   quickIconDanger: { backgroundColor: colors.dangerSurface },
-  quickLabel: { fontSize: 13, color: colors.text },
+  quickLabel: { fontSize: 15, color: colors.text },
   row: {
     flexDirection: "row",
     alignItems: "center",
@@ -466,7 +466,7 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   rowText: { flex: 1, gap: 2 },
-  rowTrailing: { fontSize: 16, fontWeight: "600", color: colors.text },
+  rowTrailing: { fontSize: 18, fontWeight: "600", color: colors.text },
   sectionHeader: {
     flexDirection: "row",
     justifyContent: "space-between",

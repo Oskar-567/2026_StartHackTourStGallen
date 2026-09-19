@@ -40,9 +40,9 @@ from django.core.management.base import BaseCommand, CommandError
 from django.utils import timezone
 
 from api import services
+from api.demo_output import DemoOutput
 from api.models import AuthorizationRecord, Decision, Mandate, Run
-from engine.aggregate import combine
-from engine.checks import DETERMINISTIC_CHECKS
+from api.reference_policies import REFERENCE_POLICIES
 from engine.decide import ENGINE_VERSION, decide
 from engine.parsing import EventParsingError, parse_event
 from engine.types import AuthorizationEvent, EngineState, ExtractedFacts
@@ -79,11 +79,16 @@ def _configure_logging() -> None:
     root.setLevel(logging.INFO)
 
 
-def _deterministic_only_decision(event: AuthorizationEvent, state: EngineState) -> EngineDecision:
-    """The watchdog's fallback: the deterministic tier's own verdict, with no
-    semantic/LLM-backed checks run at all."""
-    results = [check(event, state, None) for check in DETERMINISTIC_CHECKS]
-    return combine(results, event.mandate.uncertainty_policy, ENGINE_VERSION)
+def _decision_without_facts(event: AuthorizationEvent, state: EngineState) -> EngineDecision:
+    """The watchdog's fallback: every check, but no fact extraction.
+
+    Only the model is slow; the checks themselves are code and take
+    milliseconds. Skipping the semantic checks too once turned "size unknown,
+    ask" into "nothing to object to, approve" and approved a size-42 shoe for a
+    size-43 customer. Without facts the semantic checks answer UNCERTAIN, which
+    is exactly the honest answer when there was no time to read the listing.
+    """
+    return decide(event, state, None)
 
 
 def _fallback_step_up(event: AuthorizationEvent) -> EngineDecision:
@@ -100,6 +105,34 @@ def _fallback_step_up(event: AuthorizationEvent) -> EngineDecision:
     )
 
 
+def _require_matching_policy(scenario_id: str, mandate: Mandate) -> None:
+    """Refuse a run whose mandate was written for a different scenario.
+
+    Easy to do by accident -- mandate IDs are just numbers -- and the result looks
+    like an engine bug: every purchase judged against someone else's instruction.
+    Scenarios without a reference policy are not checked.
+    """
+    reference = REFERENCE_POLICIES.get(scenario_id)
+    if reference is None or reference["instruction"] == mandate.instruction:
+        return
+    matching = [
+        m.pk
+        for m in Mandate.objects.filter(
+            status=Mandate.Status.ACTIVE, instruction=reference["instruction"]
+        )
+    ]
+    hint = (
+        f"Active mandate(s) for {scenario_id}: {matching}."
+        if matching
+        else f"Create one with: create_mandate --scenario {scenario_id}."
+    )
+    raise CommandError(
+        f"Mandate {mandate.pk} was written for a different instruction "
+        f"({mandate.instruction[:60]!r}...), not {scenario_id}'s. {hint} "
+        "Pass --any-policy to run it anyway."
+    )
+
+
 class Command(BaseCommand):
     help = "Long-polls the challenge API and decides each proposed purchase within its deadline."
 
@@ -112,6 +145,9 @@ class Command(BaseCommand):
         # Built on first use so tests that drive `_handle_envelope` directly get
         # the configured backend too; `handle()` builds and warms it up front.
         self._extractor: FactExtractor | None = None
+        # Set by --pretty: readable per-purchase output for a live demo.
+        self._out: DemoOutput | None = None
+        self._facts_note: str | None = None
 
     def _get_extractor(self) -> FactExtractor:
         if self._extractor is None:
@@ -129,6 +165,19 @@ class Command(BaseCommand):
             help="Local Mandate primary key (must be active) to bind a new --scenario run to.",
         )
         parser.add_argument(
+            "--any-policy",
+            action="store_true",
+            help=(
+                "Allow a mandate whose instruction differs from the scenario's reference "
+                "policy (e.g. to see how one policy judges another scenario's purchases)."
+            ),
+        )
+        parser.add_argument(
+            "--pretty",
+            action="store_true",
+            help="Readable demo output (one block per purchase) instead of the log lines.",
+        )
+        parser.add_argument(
             "--once",
             action="store_true",
             help="Process a single poll cycle then exit (useful for scripts/tests).",
@@ -136,6 +185,11 @@ class Command(BaseCommand):
 
     def handle(self, *args, **options) -> None:
         _configure_logging()
+        if options.get("pretty"):
+            self._out = DemoOutput()
+            # The key=value log would interleave with the story; keep only errors.
+            logging.getLogger("viseca").setLevel(logging.ERROR)
+            logging.getLogger("facts").setLevel(logging.ERROR)
         client = services.get_client()
 
         scenario_id = options.get("scenario_id")
@@ -150,14 +204,23 @@ class Command(BaseCommand):
                 raise CommandError(
                     f"Mandate {mandate_pk} is not active (status={mandate.status!r})."
                 )
-            self._run = self._start_run(client, scenario_id, mandate)
+            if not options.get("any_policy"):
+                _require_matching_policy(scenario_id, mandate)
 
+        # Load the model BEFORE starting the run: the run's first purchase is
+        # queued at once and its 8 s deadline starts then. Warming up after the
+        # start once let the first purchase expire while the model loaded.
         extractor = self._get_extractor()
         warm_up = getattr(extractor, "warm_up", None)
         warmed = warm_up() if callable(warm_up) else None
         logger.info("facts_backend=%s warm_up=%s", extractor.name, warmed)
 
+        if scenario_id:
+            self._run = self._start_run(client, scenario_id, mandate)
+
         logger.info("worker_starting run_id=%s", self._run.run_id if self._run else "<resuming>")
+        if self._out is not None and self._run is not None:
+            self._out.header(scenario_id, self._run.mandate, extractor.name, self._run.run_id)
 
         while True:
             self._forward_pending_resolutions(client)
@@ -165,6 +228,8 @@ class Command(BaseCommand):
             if envelope is None:
                 if self._run is not None and self._run_finished(client, self._run):
                     logger.info("run_complete run_id=%s", self._run.run_id)
+                    if self._out is not None:
+                        self._out.summary(self._run.event_counters)
                     break
                 if once:
                     break
@@ -342,6 +407,8 @@ class Command(BaseCommand):
         self, client, authorization: AuthorizationRecord, event: AuthorizationEvent
     ) -> None:
         state = services.build_engine_state(authorization.run, authorization)
+        # What happened to fact extraction for this purchase, for --pretty output.
+        self._facts_note = None
 
         margin = (authorization.deadline_at - timezone.now()).total_seconds()
         try:
@@ -351,7 +418,8 @@ class Command(BaseCommand):
                     authorization.authorization_id,
                     margin,
                 )
-                engine_decision = _deterministic_only_decision(event, state)
+                engine_decision = _decision_without_facts(event, state)
+                self._facts_note = f"no facts: only {margin:.1f} s left, rules only"
             else:
                 facts = self._extract_within_deadline(authorization, margin)
                 engine_decision = decide(event, state, facts)
@@ -373,6 +441,9 @@ class Command(BaseCommand):
             engine_decision.decision.value,
             list(engine_decision.reason_codes),
         )
+        if self._out is not None:
+            elapsed = (timezone.now() - authorization.received_at).total_seconds()
+            self._out.decision(event, engine_decision, elapsed, self._facts_note)
 
     def _extract_within_deadline(
         self, authorization: AuthorizationRecord, margin: float
@@ -390,6 +461,10 @@ class Command(BaseCommand):
                 authorization.authorization_id,
                 margin,
             )
+            self._facts_note = (
+                f"no facts: {margin:.1f} s left, model needs up to "
+                f"{settings.FACTS_TIMEOUT_SECONDS:g} s"
+            )
             return None
         extractor = self._get_extractor()
         started = time.monotonic()
@@ -397,14 +472,24 @@ class Command(BaseCommand):
             facts = extract_for_event(extractor, services.event_payload(authorization.raw_event))
         except Exception:  # noqa: BLE001 - extraction must never block a decision
             logger.exception("facts_failed authorization_id=%s", authorization.authorization_id)
+            self._facts_note = "no facts: the model failed"
             return None
+        elapsed = time.monotonic() - started
+        lines = len(services.event_payload(authorization.raw_event)["authorization"]["items"])
+        read = sum(1 for item in facts.items if item.category_verified or item.attributes)
+        if facts.source != "stand-in":
+            self._facts_note = (
+                f"{facts.source} read {read}/{lines} item(s) in {elapsed:.1f} s"
+                if read
+                else f"no facts: {facts.source} gave nothing back after {elapsed:.1f} s"
+            )
         logger.info(
             "facts authorization_id=%s source=%s lines_read=%d/%d elapsed=%.2fs",
             authorization.authorization_id,
             facts.source,
             sum(1 for item in facts.items if item.category or item.attributes),
-            len(services.event_payload(authorization.raw_event)["authorization"]["items"]),
-            time.monotonic() - started,
+            lines,
+            elapsed,
         )
         return facts
 
@@ -432,3 +517,5 @@ class Command(BaseCommand):
                 decision.authorization.authorization_id,
                 decision.decision,
             )
+            if self._out is not None:
+                self._out.resolution(decision.authorization, decision.decision)

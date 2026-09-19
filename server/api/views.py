@@ -1,7 +1,9 @@
 import os
+from datetime import timedelta
 
 from django.db import DatabaseError, connection
 from django.shortcuts import get_object_or_404
+from django.utils import timezone
 from drf_spectacular.utils import extend_schema, inline_serializer
 from rest_framework import generics, serializers, status
 from rest_framework.decorators import api_view
@@ -150,12 +152,23 @@ class MandateConfirmView(APIView):
 
 @extend_schema(tags=["step-ups"])
 class StepUpListView(generics.ListAPIView):
-    """The pending approval queue: authorizations awaiting a customer answer."""
+    """The pending approval queue: purchases the customer can still answer, newest first.
+
+    A step-up whose human window has closed is left out: the challenge API has
+    already counted it as timed out, so it can no longer be approved or declined,
+    and leaving it listed buries the purchases that still can.
+    """
 
     serializer_class = StepUpSerializer
 
     def get_queryset(self):
-        return AuthorizationRecord.objects.pending_step_ups().select_related("run")
+        window_start = timezone.now() - timedelta(seconds=services.HUMAN_WINDOW_SECONDS)
+        return (
+            AuthorizationRecord.objects.pending_step_ups()
+            .filter(latest_decision_at__gte=window_start)
+            .select_related("run")
+            .order_by("-latest_decision_at")
+        )
 
 
 @extend_schema(

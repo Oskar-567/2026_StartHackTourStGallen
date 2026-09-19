@@ -128,3 +128,24 @@ def test_double_resolve_is_a_clean_400(api_client):
     assert second.status_code == 400
     assert authorization.decisions.filter(source=Decision.Source.CUSTOMER).count() == 1
     assert ApprovedSpend.objects.filter(authorization=authorization).count() == 1
+
+
+@pytest.mark.django_db
+def test_step_up_queue_leaves_out_step_ups_whose_answer_window_closed(api_client):
+    from datetime import timedelta
+
+    from django.utils import timezone
+
+    from api import services
+
+    open_one = make_authorization(authorization_id="AU_OPEN")
+    make_step_up_decision(open_one)
+    closed_one = make_authorization(authorization_id="AU_CLOSED")
+    old = make_step_up_decision(closed_one)
+    Decision.objects.filter(pk=old.pk).update(
+        created_at=timezone.now() - timedelta(seconds=services.HUMAN_WINDOW_SECONDS + 5)
+    )
+
+    body = api_client.get(reverse("step-up-list")).json()
+
+    assert [item["authorization_id"] for item in body] == ["AU_OPEN"]

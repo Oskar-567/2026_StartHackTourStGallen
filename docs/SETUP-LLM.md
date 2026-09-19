@@ -34,7 +34,7 @@ Which one runs is an environment variable. Nothing else in the system changes.
 
 **Why bother with local:** product text never leaves the machine, and the
 workload suits it — across the whole challenge data pack, `item_details`
-averages 56 characters and never exceeds 276. Pulling a size out of one
+averages 57 characters and never exceeds 276. Pulling a size out of one
 sentence is extraction, not reasoning.
 
 **Note on the stand-in:** it cannot verify anything, so with `stand-in` the

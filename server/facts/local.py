@@ -2,7 +2,7 @@
 
 Product text never leaves the machine. For a Swiss payments business owned by
 banks that is a deployment property worth having, and this workload happens to
-suit it: across the challenge data pack, `item_details` averages 56 characters
+suit it: across the challenge data pack, `item_details` averages 57 characters
 and never exceeds 276. Pulling a size and a return window out of one sentence
 is extraction, not reasoning, and the output is schema-constrained so a small
 model cannot drift into prose.

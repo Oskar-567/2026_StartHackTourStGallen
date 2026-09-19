@@ -68,7 +68,7 @@ _PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = tuple(
     )
 )
 
-_QUOTE_CHARS = 160
+_QUOTE_CHARS = 240
 
 
 def _texts(event: AuthorizationEvent) -> list[tuple[str, str]]:

@@ -303,3 +303,41 @@ def test_worker_forwards_a_fresh_customer_answer_and_skips_an_expired_one():
 
     forwarded = [call.args[0] for call in client.resolve.call_args_list]
     assert forwarded == ["AU_FRESH"]
+
+
+@pytest.mark.django_db
+def test_a_run_is_refused_when_the_mandate_belongs_to_another_scenario():
+    from django.core.management import CommandError, call_command
+
+    from api.reference_policies import REFERENCE_POLICIES
+
+    monitor = make_mandate(
+        instruction=REFERENCE_POLICIES["SCEN0004"]["instruction"], status="active"
+    )
+    with pytest.raises(CommandError, match="different instruction"):
+        call_command("run_worker", "--scenario", "SCEN0003", "--mandate-id", str(monitor.pk))
+
+
+@pytest.mark.django_db
+def test_the_watchdog_never_approves_what_it_had_no_time_to_read(monkeypatch):
+    """Tight deadline, policy requires a size: the answer is a question, not approval."""
+    monkeypatch.setattr(services, "_history_rows_cache", [])
+    mandate = make_mandate(
+        mandate_id="TM1",
+        status="active",
+        intent_spec={
+            "allowed_item_categories": ["groceries"],
+            "required_attributes": {"size": "43"},
+        },
+    )
+    run = make_run(mandate=mandate, run_id="run-watchdog-safe")
+    client = MagicMock()
+    client.submit_decision.return_value = {"status": "accepted"}
+
+    command = Command()
+    command._extractor = _RecordingExtractor({"size": "43"})
+    command._handle_envelope(client, _envelope(run.run_id, "AU_TIGHT_SAFE", _deadline_in(0.5)))
+
+    decision = Decision.objects.get(source=Decision.Source.ENGINE)
+    assert command._extractor.calls == 0
+    assert decision.decision != Decision.Value.APPROVE

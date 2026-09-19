@@ -115,6 +115,7 @@ class AuthorizationRecord(models.Model):
             return self.annotate(
                 latest_decision_value=Subquery(latest.values("decision")[:1]),
                 latest_decision_source=Subquery(latest.values("source")[:1]),
+                latest_decision_at=Subquery(latest.values("created_at")[:1]),
             ).filter(
                 latest_decision_value=Decision.Value.STEP_UP,
                 latest_decision_source=Decision.Source.ENGINE,
