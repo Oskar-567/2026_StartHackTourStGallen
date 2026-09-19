@@ -62,6 +62,11 @@ def event_payload(raw_event: dict) -> dict:
     return data if isinstance(data, dict) else raw_event
 
 
+#: Run IDs created locally by `replay --seed-queue` to try the approval queue.
+#: They never existed at the challenge API, so nothing about them is forwarded.
+DEMO_RUN_PREFIX = "demo-"
+
+
 def with_intent_spec(event: dict, run: Run) -> dict:
     """The event with the run's confirmed `intent_spec` attached to its mandate.
 

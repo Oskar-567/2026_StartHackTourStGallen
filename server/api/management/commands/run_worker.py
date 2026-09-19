@@ -392,7 +392,7 @@ class Command(BaseCommand):
     def _forward_pending_resolutions(self, client) -> None:
         pending = Decision.objects.filter(
             source=Decision.Source.CUSTOMER, forwarded_at__isnull=True
-        )
+        ).exclude(authorization__run__run_id__startswith=services.DEMO_RUN_PREFIX)
         for decision in pending:
             try:
                 services.forward_customer_resolution(decision, client=client)

@@ -42,7 +42,8 @@ from typing import Any
 from django.conf import settings
 from django.core.management.base import BaseCommand, CommandError
 
-from api.services import familiarity_from_rows
+from api.models import AuthorizationRecord, Decision, Mandate, Run
+from api.services import DEMO_RUN_PREFIX, familiarity_from_rows
 from engine.decide import decide
 from engine.parsing import EventParsingError, parse_event
 from engine.types import ApprovedPurchase, DecisionType, EngineState
@@ -380,6 +381,56 @@ def _format_row(
     )
 
 
+def _seed_run(scenario_id: str, policy: dict[str, Any]) -> Run:
+    """A local mandate and run to hang seeded step-ups on.
+
+    Never sent to the challenge API: the run ID carries `DEMO_RUN_PREFIX`, which
+    the worker skips when forwarding customer answers.
+    """
+    now = datetime.now(UTC)
+    mandate = Mandate.objects.create(
+        instruction=policy["instruction"],
+        hard_rules=policy["hard_rules"],
+        uncertainty_policy=policy["uncertainty_policy"],
+        intent_spec=policy.get("intent_spec") or {},
+        status=Mandate.Status.ACTIVE,
+        mandate_id=f"{DEMO_RUN_PREFIX}{scenario_id}",
+        confirmed_at=now,
+    )
+    return Run.objects.create(
+        run_id=f"{DEMO_RUN_PREFIX}{scenario_id}-{now:%H%M%S}",
+        scenario_id=scenario_id,
+        mandate=mandate,
+        started_at=now,
+    )
+
+
+def _seed_step_up(run: Run, event_dict: dict, parsed, result) -> None:
+    """Store one engine step-up exactly as the worker would, minus the API call."""
+    now = datetime.now(UTC)
+    authorization = AuthorizationRecord.objects.create(
+        run=run,
+        authorization_id=f"{run.run_id}-{parsed.authorization_id}",
+        source_authorization_id=parsed.source_authorization_id,
+        raw_event=event_dict,
+        simulated_purchased_at=parsed.timestamp,
+        deadline_at=parsed.deadline_at,
+        received_at=now,
+        billing_amount_chf=parsed.billing_amount_chf,
+    )
+    payload = result.to_api_payload()
+    Decision.objects.create(
+        authorization=authorization,
+        decision=Decision.Value.STEP_UP,
+        reason_codes=payload["reason_codes"],
+        evidence=payload["evidence"],
+        customer_message=result.customer_message,
+        engine_version=result.engine_version,
+        is_final=False,
+        source=Decision.Source.ENGINE,
+    )
+
+
 class Command(BaseCommand):
     help = (
         "Offline replay of a scenario's purchase attempts against the engine "
@@ -388,6 +439,14 @@ class Command(BaseCommand):
 
     def add_arguments(self, parser) -> None:
         parser.add_argument("--scenario", dest="scenario_id", default="SCEN0000")
+        parser.add_argument(
+            "--seed-queue",
+            action="store_true",
+            help=(
+                "Also store every step_up in the local database, so the app's approval "
+                "queue can be tried without a live run. Needs the database."
+            ),
+        )
         parser.add_argument(
             "--facts",
             dest="facts_backend",
@@ -484,6 +543,8 @@ class Command(BaseCommand):
         extraction_seconds: list[float] = []
         state = ReplayState.seeded(merchant_counts, device_counts)
         exit_code = 0
+        seed_run = _seed_run(scenario_id, policy) if options.get("seed_queue") else None
+        seeded = 0
         for row in scenario_rows:
             authorization_id = row["authorization_id"]
             try:
@@ -518,6 +579,10 @@ class Command(BaseCommand):
             lines_with_attributes += sum(1 for f in facts.items if f.attributes)
             lines_with_category += sum(1 for f in facts.items if f.category)
             result = decide(parsed, engine_state, facts)
+            # Before the Decimal swap below: raw_event must stay JSON-serialisable.
+            if seed_run is not None and result.decision is DecisionType.STEP_UP:
+                _seed_step_up(seed_run, event_dict, parsed, result)
+                seeded += 1
 
             # parse_event already validated this dict; swap in the Decimal it
             # parsed so ReplayState.record carries an exact amount forward.
@@ -564,6 +629,11 @@ class Command(BaseCommand):
             f"Final approved total: CHF {state.approved_total_chf:.2f} across "
             f"{len(state.approved_purchases)} approved purchase(s)."
         )
+
+        if seed_run is not None:
+            self.stdout.write(
+                f"Seeded {seeded} step-up(s) into the approval queue (run {seed_run.run_id})."
+            )
 
         if exit_code:
             sys.exit(exit_code)
