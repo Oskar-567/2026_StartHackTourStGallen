@@ -292,13 +292,13 @@ function useNow(): number {
 }
 
 const styles = StyleSheet.create({
-  heroLabel: { fontSize: 18, fontWeight: "500", color: colors.onHero },
+  heroLabel: { fontSize: 20, fontWeight: "500", color: colors.onHero },
   heroValue: { fontSize: 44, fontWeight: "600", color: colors.onHero },
-  heroDetail: { fontSize: 15, color: colors.onHeroMuted },
+  heroDetail: { fontSize: 17, color: colors.onHeroMuted },
   card: { gap: spacing.md },
   cardHeader: { flexDirection: "row", justifyContent: "space-between", gap: spacing.md },
   merchantBlock: { flex: 1, gap: 2 },
-  merchant: { fontSize: 18, fontWeight: "600", color: colors.text },
+  merchant: { fontSize: 20, fontWeight: "600", color: colors.text },
   items: {
     backgroundColor: colors.surfaceRaised,
     borderRadius: 12,
@@ -309,11 +309,11 @@ const styles = StyleSheet.create({
   itemRow: { flexDirection: "row", justifyContent: "space-between", gap: spacing.sm },
   itemName: { flex: 1 },
   block: { gap: spacing.xs + 2 },
-  label: { fontSize: 13, fontWeight: "600", color: colors.textMuted },
+  label: { fontSize: 15, fontWeight: "600", color: colors.textMuted },
   chips: { flexDirection: "row", flexWrap: "wrap", gap: spacing.xs + 2 },
-  evidence: { fontSize: 14, color: colors.text, lineHeight: 20 },
-  expired: { fontSize: 13, color: colors.danger },
+  evidence: { fontSize: 16, color: colors.text, lineHeight: 23 },
+  expired: { fontSize: 15, color: colors.danger },
   actions: { flexDirection: "row", gap: spacing.md },
   action: { flex: 1 },
-  footerLink: { fontSize: 14, color: colors.link, textAlign: "center", marginTop: spacing.lg },
+  footerLink: { fontSize: 16, color: colors.link, textAlign: "center", marginTop: spacing.lg },
 });

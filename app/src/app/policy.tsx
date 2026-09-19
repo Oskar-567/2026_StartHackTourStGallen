@@ -356,10 +356,10 @@ function TightenPanel({
 
 const styles = StyleSheet.create({
   heroTop: { flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
-  heroLabel: { fontSize: 18, fontWeight: "500", color: colors.onHero },
+  heroLabel: { fontSize: 20, fontWeight: "500", color: colors.onHero },
   heroValue: { fontSize: 40, fontWeight: "600", color: colors.onHero },
-  heroDetail: { fontSize: 15, color: colors.onHeroMuted },
-  quote: { fontSize: 17, fontStyle: "italic", color: colors.text, lineHeight: 24 },
+  heroDetail: { fontSize: 17, color: colors.onHeroMuted },
+  quote: { fontSize: 19, fontStyle: "italic", color: colors.text, lineHeight: 27 },
   rule: { paddingVertical: spacing.sm },
   ruleDivider: { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.border },
   questions: { backgroundColor: colors.attentionSurface },
@@ -367,11 +367,11 @@ const styles = StyleSheet.create({
   row: { flexDirection: "row", gap: spacing.sm, alignItems: "center" },
   input: {
     flex: 1,
-    minHeight: 48,
+    minHeight: 52,
     backgroundColor: colors.surfaceRaised,
     borderRadius: radius.chip,
     paddingHorizontal: spacing.lg,
-    fontSize: 16,
+    fontSize: 18,
     color: colors.text,
   },
   meta: { ...type.small, textAlign: "center" },

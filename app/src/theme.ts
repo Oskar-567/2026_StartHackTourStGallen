@@ -31,12 +31,12 @@ export const radius = { card: 16, pill: 999, chip: 12, sheet: 24 } as const;
 export const spacing = { xs: 4, sm: 8, md: 12, lg: 16, xl: 24 } as const;
 
 export const type = {
-  largeTitle: { fontSize: 30, fontWeight: "500", color: colors.text },
-  sectionTitle: { fontSize: 20, fontWeight: "500", color: colors.text },
-  amount: { fontSize: 22, fontWeight: "600", color: colors.text },
-  body: { fontSize: 16, color: colors.text },
-  secondary: { fontSize: 14, color: colors.textMuted },
-  small: { fontSize: 13, color: colors.textMuted },
+  largeTitle: { fontSize: 34, fontWeight: "500", color: colors.text },
+  sectionTitle: { fontSize: 22, fontWeight: "500", color: colors.text },
+  amount: { fontSize: 24, fontWeight: "600", color: colors.text },
+  body: { fontSize: 18, color: colors.text },
+  secondary: { fontSize: 16, color: colors.textMuted },
+  small: { fontSize: 15, color: colors.textMuted },
 } as const;
 
 /** Swiss formatting: `CHF 1'234.50`. */

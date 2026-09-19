@@ -5,6 +5,7 @@ from drf_spectacular.utils import extend_schema_field
 from rest_framework import serializers
 
 from api.models import AuthorizationRecord, Decision, Mandate
+from api.services import HUMAN_WINDOW_SECONDS
 
 
 class MandateSerializer(serializers.ModelSerializer):
@@ -98,11 +99,6 @@ class MandateTightenSerializer(serializers.Serializer):
             guidance=self.validated_data.get("guidance"),
             open_questions=self.validated_data.get("open_questions"),
         )
-
-
-#: How long the customer has to answer a step-up. The challenge API's default
-#: human window; distinct from `deadline_at`, the ~8s automated deadline.
-HUMAN_WINDOW_SECONDS = 120
 
 
 class _EvidenceSerializer(serializers.Serializer):
