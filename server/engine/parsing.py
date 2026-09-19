@@ -275,10 +275,21 @@ def _parse_intent_spec(raw: Any, path: str) -> IntentSpec | None:
     purpose = raw.get("purpose", "")
     if not isinstance(purpose, str):
         _fail(path, "'purpose' must be a string")
+    minimums = raw.get("minimum_attributes", {})
+    if not isinstance(minimums, dict) or not all(
+        isinstance(k, str) and isinstance(v, int | float) and not isinstance(v, bool)
+        for k, v in minimums.items()
+    ):
+        _fail(path, "'minimum_attributes' must be a mapping of string to number")
+    fulfilment = raw.get("fulfilment")
+    if fulfilment not in (None, "single", "recurring"):
+        _fail(path, "'fulfilment' must be 'single', 'recurring' or absent")
     return IntentSpec(
         purpose=purpose,
         allowed_item_categories=frozenset(categories),
         required_attributes=dict(attributes),
+        minimum_attributes={k: float(v) for k, v in minimums.items()},
+        fulfilment=fulfilment,
     )
 
 

@@ -68,6 +68,16 @@ class TestParseResponse:
         )
         assert facts.for_line(1).attributes == {}
 
+    def test_a_leaked_reasoning_trace_does_not_lose_the_answer(self) -> None:
+        """A stray <think> block must not cost us an otherwise good extraction."""
+        facts = parse_response(
+            "<think>The listing says size 43. I should report that.</think> "
+            '{"items": [{"line_no": 1, "category": "sporting_goods", "size": "43",'
+            ' "colour": null, "type": null, "material": null, "return_days": null}]}',
+            source="test",
+        )
+        assert facts.for_line(1).attributes["size"] == "43"
+
     def test_a_category_outside_the_vocabulary_becomes_unknown(self) -> None:
         """A model cannot invent a category that then matches nothing meaningfully."""
         facts = parse_response(

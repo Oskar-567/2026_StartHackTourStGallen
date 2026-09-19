@@ -194,9 +194,28 @@ class IntentSpec:
     confirm a basket against an empty set and resolves UNCERTAIN instead."""
 
     required_attributes: Mapping[str, str] = field(default_factory=dict)
-    """Attributes every requested item must have, e.g. `{"size": "43"}`.
+    """Attributes every requested item must match exactly, e.g. `{"size": "43"}`.
     Compared against facts extracted from merchant text -- never against the
     merchant text itself."""
+
+    fulfilment: Literal["single", "recurring"] | None = None
+    """Whether this purpose is served once or over and over.
+
+    "Replace my worn shoes" is `"single"`; "order our groceries" is
+    `"recurring"`. `None` means nobody established which, and
+    `checks/fulfilment.py` then stays silent rather than inventing a
+    restriction: guessing wrong in either direction is costly, and this
+    belongs in the policy the customer confirmed, not in a heuristic.
+    """
+
+    minimum_attributes: Mapping[str, float] = field(default_factory=dict)
+    """Attributes that must reach a threshold, e.g. `{"return_days": 14}` for
+    "returnable within 14 days or more".
+
+    Separate from `required_attributes` because people state requirements both
+    ways: "size 43" is an equality, "14 days or more" is a floor, and treating
+    the second as the first would reject a 30-day return window for not being
+    the string "14"."""
 
 
 @dataclass(frozen=True, slots=True)

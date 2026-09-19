@@ -67,6 +67,8 @@ _SCENARIO_POLICIES: dict[str, dict[str, Any]] = {
         "intent_spec": {
             "purpose": "one ordinary grocery item",
             "allowed_item_categories": ["groceries"],
+            # "Buy one ordinary grocery item" -- one item, not a standing order.
+            "fulfilment": "single",
         },
     },
     "SCEN0001": {
@@ -96,6 +98,8 @@ _SCENARIO_POLICIES: dict[str, dict[str, Any]] = {
         "intent_spec": {
             "purpose": "household groceries for delivery",
             "allowed_item_categories": ["groceries"],
+            # "Order our household groceries" -- this repeats by nature.
+            "fulfilment": "recurring",
         },
     },
     "SCEN0002": {
@@ -112,6 +116,15 @@ _SCENARIO_POLICIES: dict[str, dict[str, Any]] = {
                 "currency": "CHF",
                 "scope": "purchase",
             },
+            # The other half of "only if the order can be returned": the platform's
+            # own structured field. `false` is a definite no; `unknown` means the
+            # shop said nothing and resolves to a question, not a refusal.
+            {
+                "field": "authorization.order_returnable",
+                "operator": "=",
+                "value": "true",
+                "scope": "purchase",
+            },
         ],
         "uncertainty_policy": "ask",
         "intent_spec": {
@@ -121,6 +134,10 @@ _SCENARIO_POLICIES: dict[str, dict[str, Any]] = {
             # stays UNCERTAIN until the real extractor lands -- which is exactly
             # the gap it is meant to make visible.
             "required_attributes": {"size": "43"},
+            # "only if the order can be returned within 14 days or more"
+            "minimum_attributes": {"return_days": 14},
+            # "Replace my worn road-running shoes" -- one pair, not a subscription.
+            "fulfilment": "single",
         },
     },
     "SCEN0003": {

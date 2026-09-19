@@ -22,7 +22,8 @@ the comparison below still happens in code.
 Verdicts:
 
 - **FAIL** -- an attribute was extracted and contradicts what the customer
-  required. Size 44 against a required size 43 is a definite mismatch.
+  required. Size 44 against a required size 43 is a definite mismatch, and so
+  is a 7-day return window against a required minimum of 14.
 - **UNCERTAIN** -- no facts at all, or the required attribute simply was not
   found in the merchant's text. Absence is not agreement.
 - **PASS** -- every required attribute was found and matches.
@@ -48,6 +49,29 @@ from engine.types import (
 )
 
 
+def _as_number(value: str | None) -> float | None:
+    """The leading number in an extracted value, or None if there isn't one.
+
+    Extractors are told to return digits only, but a stray "30 days" should
+    still be usable. Anything genuinely unreadable returns None, which becomes
+    UNCERTAIN -- a question for the customer, never a silent pass.
+    """
+    if value is None:
+        return None
+    digits = ""
+    for character in value.strip():
+        if character.isdigit() or (character == "." and "." not in digits):
+            digits += character
+        elif digits:
+            break
+        else:
+            return None
+    try:
+        return float(digits)
+    except ValueError:
+        return None
+
+
 def _normalise(value: str) -> str:
     """Compare attributes case- and whitespace-insensitively.
 
@@ -63,7 +87,7 @@ def check(
 ) -> CheckResult:
     intent = event.mandate.intent_spec
 
-    if intent is None or not intent.required_attributes:
+    if intent is None or not (intent.required_attributes or intent.minimum_attributes):
         return CheckResult(
             verdict=Verdict.PASS,
             reason_code=None,
@@ -82,7 +106,8 @@ def check(
                     value=None,
                     note=(
                         "no extracted facts available; required attributes "
-                        f"{sorted(intent.required_attributes)} could not be confirmed"
+                        f"{sorted({**intent.required_attributes, **intent.minimum_attributes})} "
+                        "could not be confirmed"
                     ),
                 ),
             ),
@@ -114,6 +139,32 @@ def check(
                         note=(
                             f"the customer requires {attribute}={required!r}, "
                             f"but this item is {found!r}"
+                        ),
+                    )
+                )
+
+        for attribute, minimum in intent.minimum_attributes.items():
+            found = None if item_facts is None else item_facts.attributes.get(attribute)
+            value = _as_number(found)
+            if value is None:
+                unknowns.append(
+                    Evidence(
+                        field=f"items[{item.line_no}].{attribute}",
+                        value=found,
+                        note=(
+                            f"the customer requires {attribute} of at least {minimum:g}, but "
+                            f"the shop supplied {'nothing readable' if found is None else found!r}"
+                        ),
+                    )
+                )
+            elif value < minimum:
+                mismatches.append(
+                    Evidence(
+                        field=f"items[{item.line_no}].{attribute}",
+                        value=found,
+                        note=(
+                            f"the customer requires {attribute} of at least {minimum:g}, "
+                            f"but this item offers {value:g}"
                         ),
                     )
                 )

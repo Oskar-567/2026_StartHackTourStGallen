@@ -15,11 +15,14 @@ both) is a stronger signal -- an irreversible order -- and is also raised as
 UNCERTAIN rather than declined outright, since plenty of ordinary purchases
 (food, digital goods) are legitimately final.
 
-All of the above applies only when the customer's mandate actually carries a
-requirement about these fields (a hard rule targeting `order_returnable` or
-`order_cancellable`). With no such rule the check passes: a grocery order
-whose merchant supplied no return terms is not a reason to interrupt someone
-who never asked about returns, and "blocking ordinary shopping unnecessarily
+All of the above applies **per field**, and only to the fields the customer's
+mandate actually names in a hard rule. A policy that requires returnability has
+said nothing about cancellation, so a missing cancellation term is not a reason
+to interrupt anyone. With neither field named the check passes outright.
+
+The narrower scoping is not fussiness. Checking both fields whenever either is
+mentioned turned every purchase in a scenario into a step-up over cancellation
+terms nobody had asked about -- and "blocking ordinary shopping unnecessarily
 is also a failure" per the brief.
 
 This mirrors, and must stay consistent with, how `checks/_hard_rule_engine.py`
@@ -35,18 +38,26 @@ from __future__ import annotations
 from engine import reasons
 from engine.types import AuthorizationEvent, CheckResult, EngineState, Evidence, Verdict
 
-_TERM_FIELDS = frozenset({"authorization.order_returnable", "authorization.order_cancellable"})
+RETURNABLE = "authorization.order_returnable"
+CANCELLABLE = "authorization.order_cancellable"
 
 
-def _mandate_requires_terms(event: AuthorizationEvent) -> bool:
-    """True when the customer's policy actually says something about order terms."""
-    return any(rule.field in _TERM_FIELDS for rule in event.mandate.hard_rules)
+def _fields_the_policy_asks_about(event: AuthorizationEvent) -> set[str]:
+    """Exactly the term fields the customer's policy names -- no more.
+
+    Per field, not per topic. A policy requiring returnability has said nothing
+    about cancellation, and answering a question nobody asked is how a control
+    layer becomes the thing people switch off.
+    """
+    named = {rule.field for rule in event.mandate.hard_rules}
+    return named & {RETURNABLE, CANCELLABLE}
 
 
 def check(
     event: AuthorizationEvent, state: EngineState, facts: object | None = None
 ) -> CheckResult:
-    if not _mandate_requires_terms(event):
+    asked_about = _fields_the_policy_asks_about(event)
+    if not asked_about:
         # The customer never asked about returns, so absent return terms are not
         # a reason to interrupt them. Raising UNCERTAIN here anyway would stop
         # ordinary shopping over a question nobody asked -- which the brief
@@ -60,7 +71,7 @@ def check(
 
     evidence: list[Evidence] = []
 
-    if event.order_returnable == "unknown":
+    if RETURNABLE in asked_about and event.order_returnable == "unknown":
         evidence.append(
             Evidence(
                 field="authorization.order_returnable",
@@ -68,7 +79,7 @@ def check(
                 note="return terms were not supplied by the merchant",
             )
         )
-    if event.order_cancellable == "unknown":
+    if CANCELLABLE in asked_about and event.order_cancellable == "unknown":
         evidence.append(
             Evidence(
                 field="authorization.order_cancellable",
@@ -84,7 +95,11 @@ def check(
             evidence=tuple(evidence),
         )
 
-    if event.order_returnable == "false" and event.order_cancellable == "false":
+    if (
+        asked_about == {RETURNABLE, CANCELLABLE}
+        and event.order_returnable == "false"
+        and event.order_cancellable == "false"
+    ):
         return CheckResult(
             verdict=Verdict.UNCERTAIN,
             reason_code=reasons.TERMS_NON_REVERSIBLE,

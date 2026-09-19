@@ -28,6 +28,7 @@ from collections.abc import Callable
 from engine.checks import (
     amount,
     duplicate,
+    fulfilment,
     item_match,
     merchant,
     period,
@@ -46,6 +47,7 @@ DETERMINISTIC_CHECKS: tuple[Check, ...] = (
     session.check,
     duplicate.check,
     terms.check,
+    fulfilment.check,
 )
 
 SEMANTIC_CHECKS: tuple[Check, ...] = (

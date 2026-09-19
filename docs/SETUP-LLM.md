@@ -76,11 +76,18 @@ already is. Only run `ollama serve` if the command above fails to connect.
 
 ## 3. Pull a model
 
-Start small. This is an extraction task, not a reasoning task.
+Start small, and **pick a model with no reasoning mode**.
 
 ```bash
-ollama pull qwen3:4b
+ollama pull qwen2.5:3b
 ```
+
+This is extraction, not thinking: pulling "size 43" out of one sentence needs
+reading, not deliberation. A reasoning model will generate a thinking trace
+before every answer, which is pure latency against an 8-second deadline — and
+switching that off depends on your Ollama version honouring `think=false`, which
+is one more thing to go wrong under demo pressure. A model that cannot think has
+nothing to disable.
 
 **Check the tag exists first** — the registry changes, and this document may be
 older than what is published:
@@ -97,24 +104,29 @@ model. Realistically you have 6–8 GB for the model.
 
 | Model | ~4-bit size | Verdict |
 |---|---|---|
-| **Qwen3 4B** | ~2.5 GB | **Start here.** Plenty for this task, loads fast |
-| Qwen3 8B | ~5 GB | Step up to this only if 4B measures too weak |
+| **Qwen2.5 3B** | ~2 GB | **Start here.** No reasoning mode, fast, enough for this |
+| Qwen2.5 7B | ~4.5 GB | Step up only if 3B measures too weak |
+| Qwen3 (any size) | — | Only if you have verified `think=false` works on your version |
 | 14B and larger | ~9 GB+ | Don't. Too little room for everything else |
 
-Bigger is not obviously better here. The input is one sentence and the output
-is schema-constrained, so a larger model mostly buys latency.
+Bigger is not obviously better here. The input is one sentence and the output is
+schema-constrained, so a larger model mostly buys latency.
 
 Quick sanity check that the model answers at all:
 
 ```bash
-ollama run qwen3:4b --think=false "Reply with the single word: ok"
+ollama run qwen2.5:3b --verbose "Reply with the single word: ok"
 ```
 
-> **`--think=false` is not optional here.** In the CLI, thinking is *on* by
-> default for models that support it, so without the flag Qwen3 will reason at
-> length before answering — or appear to hang producing nothing. That is the CLI
-> default, not a broken model and not how we run it: `facts/local.py` sends
-> `think=False` on every request. Interactively, `/set nothink` does the same.
+`--verbose` prints timings — tokens per second and total duration. That is the
+number to watch when tuning.
+
+> **If you use a reasoning model anyway** (Qwen3, DeepSeek-R1, …), the CLI
+> enables thinking by default, so it will deliberate at length over even a
+> one-word prompt. `--think=false` disables it where the version supports it,
+> `/no_think` in the prompt is Qwen3's own switch, and `facts/local.py` sends
+> `think=False` on every API request. If any of those fails to take effect,
+> that is the argument for a non-reasoning model, not for fighting the switch.
 
 ---
 

@@ -50,12 +50,14 @@ TERMS_NON_REVERSIBLE = "terms_non_reversible"
 ITEM_MATCH_FACTS_UNAVAILABLE = "item_match_facts_unavailable"
 ITEM_MATCH_ATTRIBUTE_MISMATCH = "item_match_attribute_mismatch"
 ITEM_MATCH_ATTRIBUTE_UNKNOWN = "item_match_attribute_unknown"
+ITEM_MATCH_BELOW_MINIMUM = "item_match_below_minimum"
 
 # -- checks/purpose_fit.py (stub) --
 PURPOSE_FIT_FACTS_UNAVAILABLE = "purpose_fit_facts_unavailable"
 PURPOSE_FIT_UNREQUESTED_ITEM = "purpose_fit_unrequested_item"
 PURPOSE_FIT_CATEGORY_UNKNOWN = "purpose_fit_category_unknown"
 PURPOSE_FIT_CATEGORY_UNVERIFIED = "purpose_fit_category_unverified"
+PURPOSE_ALREADY_FULFILLED = "purpose_already_fulfilled"
 
 # -- aggregate.py: no check fired anything notable --
 NO_CONCERNS = "no_concerns"
