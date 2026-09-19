@@ -1,8 +1,9 @@
-import { Stack } from "expo-router";
 import { useCallback, useEffect, useState } from "react";
-import { ActivityIndicator, Pressable, StyleSheet, Text, View } from "react-native";
+import { StyleSheet, Text, View } from "react-native";
 
-import { API_URL, fetchHealth, type Health } from "@/services/api";
+import { Card, Chip, LargeTitle, Loading, PillButton, Screen } from "@/components/ui";
+import { API_URL, errorMessage, fetchHealth, type Health } from "@/services/api";
+import { type } from "@/theme";
 
 type HealthState =
   | { kind: "loading" }
@@ -16,11 +17,7 @@ export default function HealthScreen() {
     () =>
       fetchHealth().then(
         (health) => setState({ kind: "loaded", health }),
-        (error: unknown) =>
-          setState({
-            kind: "failed",
-            message: error instanceof Error ? error.message : String(error),
-          }),
+        (error: unknown) => setState({ kind: "failed", message: errorMessage(error) }),
       ),
     [],
   );
@@ -35,54 +32,54 @@ export default function HealthScreen() {
   };
 
   return (
-    <View style={styles.container}>
-      <Stack.Screen options={{ title: "Server status" }} />
-      <Text style={styles.title}>Server status</Text>
-      <Text style={styles.muted}>{API_URL}</Text>
+    <Screen>
+      <LargeTitle>Server status</LargeTitle>
+      <Text style={type.small}>{API_URL}</Text>
 
       {state.kind === "loading" && (
         <>
-          <ActivityIndicator size="large" />
-          <Text style={styles.muted}>The free server may need up to a minute to wake up.</Text>
+          <Loading />
+          <Text style={[type.secondary, styles.center]}>
+            The free server may need up to a minute to wake up.
+          </Text>
         </>
       )}
 
       {state.kind === "loaded" && (
-        <>
-          <Text style={styles.text}>API: {state.health.status}</Text>
-          <Text style={styles.text}>Database: {state.health.database}</Text>
-          <Text style={styles.muted}>Version: {state.health.version}</Text>
-        </>
+        <Card>
+          <Row label="API" ok={state.health.status === "ok"} />
+          <Row label="Database" ok={state.health.database === "ok"} />
+          <Text style={type.small}>Version: {state.health.version}</Text>
+        </Card>
       )}
 
-      {state.kind === "failed" && <Text style={styles.error}>{state.message}</Text>}
+      {state.kind === "failed" && (
+        <Card>
+          <Text style={type.body}>The server could not be reached.</Text>
+          <Text style={type.small}>{state.message}</Text>
+        </Card>
+      )}
 
-      <Pressable style={styles.button} onPress={retry} disabled={state.kind === "loading"}>
-        <Text style={styles.buttonText}>Check again</Text>
-      </Pressable>
+      <PillButton
+        label="Check again"
+        variant="secondary"
+        disabled={state.kind === "loading"}
+        onPress={retry}
+      />
+    </Screen>
+  );
+}
+
+function Row({ label, ok }: { label: string; ok: boolean }) {
+  return (
+    <View style={styles.row}>
+      <Text style={type.body}>{label}</Text>
+      <Chip label={ok ? "OK" : "Error"} tone={ok ? "success" : "danger"} />
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    alignItems: "center",
-    justifyContent: "center",
-    gap: 12,
-    padding: 24,
-    backgroundColor: "#ffffff",
-  },
-  title: { fontSize: 24, fontWeight: "600", color: "#111111" },
-  text: { fontSize: 18, color: "#111111" },
-  muted: { fontSize: 14, color: "#666666", textAlign: "center" },
-  error: { fontSize: 16, color: "#b00020", textAlign: "center" },
-  button: {
-    marginTop: 12,
-    paddingVertical: 10,
-    paddingHorizontal: 20,
-    borderRadius: 8,
-    backgroundColor: "#111111",
-  },
-  buttonText: { color: "#ffffff", fontSize: 16 },
+  center: { textAlign: "center" },
+  row: { flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
 });

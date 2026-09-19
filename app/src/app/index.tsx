@@ -1,18 +1,36 @@
-import { Link, Stack } from "expo-router";
+import { useRouter } from "expo-router";
 import { useCallback, useEffect, useState } from "react";
-import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import { StyleSheet, Text, View } from "react-native";
 
 import {
+  Card,
+  Chip,
+  HeroCard,
+  LargeTitle,
+  Loading,
+  NavTile,
+  Notice,
+  PillButton,
+  ProgressBar,
+  Screen,
+  SectionTitle,
+} from "@/components/ui";
+import {
   errorMessage,
+  fetchMandates,
   fetchStepUps,
   resolveStepUp,
+  type Mandate,
   type StepUp,
   type StepUpAnswer,
 } from "@/services/api";
+import { purchaseLimitChf } from "@/services/policy";
 import { reasonLabel } from "@/services/reasons";
+import { colors, formatChf, spacing, type } from "@/theme";
 
 // The customer has 120 seconds per step-up; polling every 2s is plenty.
 const POLL_INTERVAL_MS = 2_000;
+const HUMAN_WINDOW_SECONDS = 120;
 
 type QueueState =
   | { kind: "loading" }
@@ -22,8 +40,10 @@ type QueueState =
 type Outcome = { merchant: string; answer: StepUpAnswer };
 
 export default function ApprovalQueueScreen() {
+  const router = useRouter();
   const [state, setState] = useState<QueueState>({ kind: "loading" });
-  const [busyId, setBusyId] = useState<number | null>(null);
+  const [mandate, setMandate] = useState<Mandate | null>(null);
+  const [busy, setBusy] = useState<{ id: number; answer: StepUpAnswer } | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [lastOutcome, setLastOutcome] = useState<Outcome | null>(null);
   const now = useNow();
@@ -49,8 +69,16 @@ export default function ApprovalQueueScreen() {
     return () => clearInterval(timer);
   }, [load]);
 
+  // The policy summary is a nicety: if it fails, the queue still works.
+  useEffect(() => {
+    fetchMandates().then(
+      (mandates) => setMandate(mandates.find((m) => m.status === "active") ?? mandates[0] ?? null),
+      () => setMandate(null),
+    );
+  }, []);
+
   const answer = async (stepUp: StepUp, decision: StepUpAnswer) => {
-    setBusyId(stepUp.id);
+    setBusy({ id: stepUp.id, answer: decision });
     setActionError(null);
     try {
       await resolveStepUp(stepUp.id, decision);
@@ -63,63 +91,85 @@ export default function ApprovalQueueScreen() {
     } catch (error) {
       setActionError(errorMessage(error));
     } finally {
-      setBusyId(null);
+      setBusy(null);
     }
   };
 
+  const waiting = state.kind === "loaded" ? state.stepUps.length : 0;
+  const limit = mandate ? purchaseLimitChf(mandate.hard_rules) : null;
+
   return (
-    <ScrollView contentContainerStyle={styles.container}>
-      <Stack.Screen options={{ title: "Approvals" }} />
+    <Screen>
+      <LargeTitle>Shopping agent</LargeTitle>
 
-      <Link href="/policy" style={styles.policyLink}>
-        View or change your wallet policy →
-      </Link>
+      <HeroCard>
+        <Text style={styles.heroLabel}>Waiting for you</Text>
+        <Text style={styles.heroValue}>{state.kind === "loaded" ? waiting : "–"}</Text>
+        <Text style={styles.heroDetail}>
+          {waiting === 0
+            ? "Your agent's purchases are checked automatically."
+            : "Nothing is paid until you decide."}
+        </Text>
+      </HeroCard>
 
-      <Text style={styles.intro}>
-        Purchases your shopping agent wants to make that the wallet could not approve on its own.
-        Nothing is paid until you decide.
-      </Text>
+      <NavTile
+        label="Wallet policy"
+        detail={
+          mandate
+            ? `${statusLabel(mandate.status)}${limit !== null ? ` · up to ${formatChf(limit)} per purchase` : ""}`
+            : "View, tighten or revoke"
+        }
+        onPress={() => router.push("/policy")}
+      />
 
       {lastOutcome && (
-        <Text style={styles.success}>
+        <Notice tone={lastOutcome.answer === "approve" ? "success" : "attention"}>
           {lastOutcome.answer === "approve" ? "Approved" : "Declined"} the purchase at{" "}
           {lastOutcome.merchant}.
-        </Text>
+        </Notice>
       )}
-      {actionError && <Text style={styles.error}>{actionError}</Text>}
+      {actionError && <Notice tone="danger">{actionError}</Notice>}
 
-      {state.kind === "loading" && <ActivityIndicator size="large" style={styles.spinner} />}
+      <SectionTitle>Approvals</SectionTitle>
+
+      {state.kind === "loading" && <Loading />}
 
       {state.kind === "failed" && (
-        <View style={styles.centered}>
-          <Text style={styles.error}>Could not load the approval queue: {state.message}</Text>
-          <Pressable
-            style={styles.secondaryButton}
+        <Card>
+          <Text style={type.body}>Could not load the approval queue.</Text>
+          <Text style={type.small}>{state.message}</Text>
+          <PillButton
+            label="Try again"
+            variant="secondary"
             onPress={() => {
               setState({ kind: "loading" });
               load();
             }}
-          >
-            <Text style={styles.secondaryButtonText}>Try again</Text>
-          </Pressable>
-        </View>
+          />
+        </Card>
       )}
 
       {state.kind === "loaded" && (
         <>
           {state.pollError && (
-            <Text style={styles.warning}>Connection problem, retrying: {state.pollError}</Text>
+            <Notice tone="attention">Connection problem, retrying: {state.pollError}</Notice>
           )}
           {state.stepUps.length === 0 ? (
-            <Text style={styles.muted}>Nothing is waiting for you.</Text>
+            <Card>
+              <Text style={type.body}>Nothing is waiting for you.</Text>
+              <Text style={type.small}>
+                When the wallet cannot decide a purchase on its own, it pauses it and asks you
+                here.
+              </Text>
+            </Card>
           ) : (
             state.stepUps.map((stepUp) => (
               <StepUpCard
                 key={stepUp.id}
                 stepUp={stepUp}
                 now={now}
-                busy={busyId === stepUp.id}
-                disabled={busyId !== null}
+                busyAnswer={busy?.id === stepUp.id ? busy.answer : null}
+                disabled={busy !== null}
                 onAnswer={(decision) => answer(stepUp, decision)}
               />
             ))
@@ -127,23 +177,27 @@ export default function ApprovalQueueScreen() {
         </>
       )}
 
-      <Link href="/status" style={styles.link}>
+      <Text style={styles.footerLink} onPress={() => router.push("/status")}>
         Server status
-      </Link>
-    </ScrollView>
+      </Text>
+    </Screen>
   );
+}
+
+function statusLabel(status: Mandate["status"]): string {
+  return { draft: "Draft, not active yet", active: "Active", revoked: "Revoked" }[status];
 }
 
 function StepUpCard({
   stepUp,
   now,
-  busy,
+  busyAnswer,
   disabled,
   onAnswer,
 }: {
   stepUp: StepUp;
   now: number;
-  busy: boolean;
+  busyAnswer: StepUpAnswer | null;
   disabled: boolean;
   onAnswer: (decision: StepUpAnswer) => void;
 }) {
@@ -153,74 +207,77 @@ function StepUpCard({
   const expired = secondsLeft === 0;
 
   return (
-    <View style={styles.card}>
+    <Card style={styles.card}>
       <View style={styles.cardHeader}>
-        <Text style={styles.merchant}>{stepUp.merchant_name ?? "Unknown shop"}</Text>
-        <Text style={styles.amount}>CHF {stepUp.billing_amount_chf}</Text>
+        <View style={styles.merchantBlock}>
+          <Text style={styles.merchant}>{stepUp.merchant_name ?? "Unknown shop"}</Text>
+          {stepUp.purchase_description && (
+            <Text style={type.secondary}>{stepUp.purchase_description}</Text>
+          )}
+        </View>
+        <Text style={type.amount}>{formatChf(stepUp.billing_amount_chf)}</Text>
       </View>
-      {stepUp.purchase_description && (
-        <Text style={styles.muted}>{stepUp.purchase_description}</Text>
-      )}
 
-      <View style={styles.section}>
+      <View style={styles.items}>
         {stepUp.items.map((item, index) => (
           <View key={index} style={styles.item}>
-            <Text style={styles.text}>
-              {item.quantity} × {item.item_name} · CHF {item.unit_price.toFixed(2)}
-            </Text>
-            {item.item_details && <Text style={styles.small}>{item.item_details}</Text>}
+            <View style={styles.itemRow}>
+              <Text style={[type.body, styles.itemName]}>
+                {item.quantity} × {item.item_name}
+              </Text>
+              <Text style={type.body}>{formatChf(item.unit_price)}</Text>
+            </View>
+            {item.item_details && <Text style={type.small}>{item.item_details}</Text>}
           </View>
         ))}
       </View>
 
-      <View style={styles.section}>
+      <View style={styles.block}>
         <Text style={styles.label}>Why it paused</Text>
-        <Text style={styles.text}>{stepUp.customer_message}</Text>
+        <Text style={type.body}>{stepUp.customer_message}</Text>
         <View style={styles.chips}>
           {stepUp.reason_codes.map((code) => (
-            <Text key={code} style={styles.chip}>
-              {reasonLabel(code)}
-            </Text>
+            <Chip key={code} label={reasonLabel(code)} tone="attention" />
           ))}
         </View>
       </View>
 
       {stepUp.evidence.length > 0 && (
-        <View style={styles.section}>
+        <View style={styles.block}>
           <Text style={styles.label}>What the wallet checked</Text>
           {stepUp.evidence.map((evidence, index) => (
-            <Text key={index} style={styles.small}>
+            <Text key={index} style={styles.evidence}>
               • {evidence.note}
             </Text>
           ))}
         </View>
       )}
 
-      <Text style={expired ? styles.error : styles.muted}>
-        {expired ? "Answer window closed" : `${secondsLeft}s left to answer`}
-      </Text>
+      <View style={styles.block}>
+        <ProgressBar fraction={secondsLeft / HUMAN_WINDOW_SECONDS} />
+        <Text style={expired ? styles.expired : type.small}>
+          {expired ? "Answer window closed" : `${secondsLeft}s left to answer`}
+        </Text>
+      </View>
 
       <View style={styles.actions}>
-        <Pressable
-          style={[styles.button, styles.decline, (disabled || expired) && styles.disabled]}
+        <PillButton
+          label="Decline"
+          variant="secondary"
+          style={styles.action}
           disabled={disabled || expired}
+          busy={busyAnswer === "decline"}
           onPress={() => onAnswer("decline")}
-        >
-          <Text style={styles.buttonText}>Decline</Text>
-        </Pressable>
-        <Pressable
-          style={[styles.button, styles.approve, (disabled || expired) && styles.disabled]}
+        />
+        <PillButton
+          label="Approve"
+          style={styles.action}
           disabled={disabled || expired}
+          busy={busyAnswer === "approve"}
           onPress={() => onAnswer("approve")}
-        >
-          {busy ? (
-            <ActivityIndicator color="#ffffff" />
-          ) : (
-            <Text style={styles.buttonText}>Approve</Text>
-          )}
-        </Pressable>
+        />
       </View>
-    </View>
+    </Card>
   );
 }
 
@@ -235,53 +292,28 @@ function useNow(): number {
 }
 
 const styles = StyleSheet.create({
-  container: { padding: 16, gap: 12, backgroundColor: "#ffffff", flexGrow: 1 },
-  intro: { fontSize: 15, color: "#333333" },
-  spinner: { marginTop: 32 },
-  centered: { alignItems: "center", gap: 12, marginTop: 24 },
-  card: {
-    borderWidth: 1,
-    borderColor: "#dddddd",
+  heroLabel: { fontSize: 18, fontWeight: "500", color: colors.onHero },
+  heroValue: { fontSize: 44, fontWeight: "600", color: colors.onHero },
+  heroDetail: { fontSize: 15, color: colors.onHeroMuted },
+  card: { gap: spacing.md },
+  cardHeader: { flexDirection: "row", justifyContent: "space-between", gap: spacing.md },
+  merchantBlock: { flex: 1, gap: 2 },
+  merchant: { fontSize: 18, fontWeight: "600", color: colors.text },
+  items: {
+    backgroundColor: colors.surfaceRaised,
     borderRadius: 12,
-    padding: 16,
-    gap: 8,
-    backgroundColor: "#fafafa",
+    padding: spacing.md,
+    gap: spacing.sm,
   },
-  cardHeader: { flexDirection: "row", justifyContent: "space-between", alignItems: "baseline" },
-  merchant: { fontSize: 18, fontWeight: "600", color: "#111111", flexShrink: 1 },
-  amount: { fontSize: 18, fontWeight: "600", color: "#111111" },
-  section: { gap: 4, marginTop: 4 },
   item: { gap: 2 },
-  label: { fontSize: 13, fontWeight: "600", color: "#666666", textTransform: "uppercase" },
-  text: { fontSize: 15, color: "#111111" },
-  small: { fontSize: 13, color: "#444444" },
-  muted: { fontSize: 14, color: "#666666" },
-  chips: { flexDirection: "row", flexWrap: "wrap", gap: 6, marginTop: 4 },
-  chip: {
-    fontSize: 12,
-    color: "#7a4a00",
-    backgroundColor: "#fff1d6",
-    paddingVertical: 3,
-    paddingHorizontal: 8,
-    borderRadius: 10,
-    overflow: "hidden",
-  },
-  actions: { flexDirection: "row", gap: 12, marginTop: 8 },
-  button: { flex: 1, paddingVertical: 12, borderRadius: 8, alignItems: "center" },
-  approve: { backgroundColor: "#1b7f3b" },
-  decline: { backgroundColor: "#b00020" },
-  disabled: { opacity: 0.4 },
-  buttonText: { color: "#ffffff", fontSize: 16, fontWeight: "600" },
-  secondaryButton: {
-    paddingVertical: 10,
-    paddingHorizontal: 20,
-    borderRadius: 8,
-    backgroundColor: "#111111",
-  },
-  secondaryButtonText: { color: "#ffffff", fontSize: 16 },
-  success: { fontSize: 15, color: "#1b7f3b" },
-  warning: { fontSize: 14, color: "#7a4a00" },
-  error: { fontSize: 15, color: "#b00020" },
-  policyLink: { fontSize: 15, fontWeight: "600", color: "#208AEF" },
-  link: { marginTop: 16, fontSize: 14, color: "#208AEF", textAlign: "center" },
+  itemRow: { flexDirection: "row", justifyContent: "space-between", gap: spacing.sm },
+  itemName: { flex: 1 },
+  block: { gap: spacing.xs + 2 },
+  label: { fontSize: 13, fontWeight: "600", color: colors.textMuted },
+  chips: { flexDirection: "row", flexWrap: "wrap", gap: spacing.xs + 2 },
+  evidence: { fontSize: 14, color: colors.text, lineHeight: 20 },
+  expired: { fontSize: 13, color: colors.danger },
+  actions: { flexDirection: "row", gap: spacing.md },
+  action: { flex: 1 },
+  footerLink: { fontSize: 14, color: colors.link, textAlign: "center", marginTop: spacing.lg },
 });
