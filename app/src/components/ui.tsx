@@ -1,7 +1,8 @@
 /**
  * Shared building blocks in the app's visual language (see `src/theme.ts`).
- * Plain React Native only, so everything runs in Expo Go and on web.
+ * Plain React Native plus expo-symbols, so everything runs in Expo Go and on web.
  */
+import { SymbolView, type SymbolViewProps } from "expo-symbols";
 import type { ReactNode } from "react";
 import {
   ActivityIndicator,
@@ -11,17 +12,217 @@ import {
   StyleSheet,
   Text,
   View,
+  type ColorValue,
   type StyleProp,
   type ViewStyle,
 } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { colors, radius, spacing, type } from "@/theme";
 
+/** Screens draw their own titles (no navigation header), so they pad for the status bar. */
 export function Screen({ children }: { children: ReactNode }) {
+  const insets = useSafeAreaInsets();
   return (
-    <ScrollView style={styles.screen} contentContainerStyle={styles.screenContent}>
+    <ScrollView
+      style={styles.screen}
+      contentContainerStyle={[styles.screenContent, { paddingTop: insets.top + spacing.lg }]}
+    >
       {children}
     </ScrollView>
+  );
+}
+
+/**
+ * Icons: SF Symbols on iOS, Material Symbols on Android and web (both via expo-symbols).
+ * Every icon needs a name per platform, or Android and web render nothing.
+ */
+const ICONS = {
+  home: { ios: "house", android: "home", web: "home" },
+  policy: { ios: "slider.horizontal.3", android: "tune", web: "tune" },
+  status: { ios: "server.rack", android: "dns", web: "dns" },
+  block: { ios: "hand.raised", android: "block", web: "block" },
+  bell: { ios: "bell", android: "notifications", web: "notifications" },
+  check: { ios: "checkmark.circle", android: "task_alt", web: "task_alt" },
+  chevronRight: { ios: "chevron.right", android: "chevron_right", web: "chevron_right" },
+  back: { ios: "chevron.left", android: "chevron_left", web: "chevron_left" },
+  shield: { ios: "checkmark.shield", android: "verified_user", web: "verified_user" },
+  bag: { ios: "bag", android: "shopping_bag", web: "shopping_bag" },
+  lock: { ios: "lock", android: "lock", web: "lock" },
+  contactless: { ios: "wave.3.right", android: "contactless", web: "contactless" },
+  timer: { ios: "clock", android: "schedule", web: "schedule" },
+  rule: { ios: "list.bullet.rectangle", android: "rule", web: "rule" },
+} satisfies Record<string, Required<Exclude<SymbolViewProps["name"], string>>>;
+
+export type IconName = keyof typeof ICONS;
+
+export function Icon({
+  name,
+  size = 22,
+  color = colors.text,
+}: {
+  name: IconName;
+  size?: number;
+  color?: ColorValue;
+}) {
+  return <SymbolView name={ICONS[name]} size={size} tintColor={color} />;
+}
+
+/** Top of a tab: small greeting line, large title, and an icon button with an optional badge. */
+export function ScreenHeader({
+  eyebrow,
+  title,
+  icon,
+  badge,
+  onIconPress,
+}: {
+  eyebrow?: string;
+  title: string;
+  icon?: IconName;
+  badge?: number;
+  onIconPress?: () => void;
+}) {
+  return (
+    <View style={styles.header}>
+      <View style={styles.headerText}>
+        {eyebrow && <Text style={type.secondary}>{eyebrow}</Text>}
+        <Text style={type.largeTitle}>{title}</Text>
+      </View>
+      {icon && (
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={badge ? `${title}, ${badge} waiting` : title}
+          style={({ pressed }) => [styles.headerButton, pressed && styles.pressed]}
+          onPress={onIconPress}
+        >
+          <Icon name={icon} color={colors.onIconCircle} />
+          {!!badge && (
+            <View style={styles.badge}>
+              <Text style={styles.badgeText}>{badge > 9 ? "9+" : badge}</Text>
+            </View>
+          )}
+        </Pressable>
+      )}
+    </View>
+  );
+}
+
+/** "‹ Back" for screens pushed on top of the tabs. */
+export function BackLink({ onPress }: { onPress: () => void }) {
+  return (
+    <Pressable accessibilityRole="button" style={styles.back} onPress={onPress}>
+      <Icon name="back" size={20} color={colors.link} />
+      <Text style={styles.backText}>Back</Text>
+    </Pressable>
+  );
+}
+
+/**
+ * The card visual at the top of the home screen, in the style of a payment card:
+ * navy face, chip, contactless mark, masked number, a label and one headline value.
+ */
+export function PaymentCard({
+  label,
+  value,
+  caption,
+  status,
+}: {
+  label: string;
+  value: string;
+  caption: string;
+  status?: ReactNode;
+}) {
+  return (
+    <View style={styles.paymentCard}>
+      <View style={styles.paymentCardGlow} />
+      <View style={styles.paymentCardTop}>
+        <View style={styles.cardChip} />
+        <Icon name="contactless" size={24} color={colors.onHero} />
+      </View>
+      <View style={styles.paymentCardBody}>
+        <Text style={styles.paymentCardLabel}>{label}</Text>
+        <Text style={styles.paymentCardValue}>{value}</Text>
+      </View>
+      <View style={styles.paymentCardBottom}>
+        <Text style={styles.paymentCardCaption} numberOfLines={1}>
+          {caption}
+        </Text>
+        {status}
+      </View>
+    </View>
+  );
+}
+
+/** A round icon button with a label underneath, as in a row of card shortcuts. */
+export function QuickAction({
+  icon,
+  label,
+  onPress,
+  tone = "default",
+}: {
+  icon: IconName;
+  label: string;
+  onPress: () => void;
+  tone?: "default" | "danger";
+}) {
+  const color = tone === "danger" ? colors.danger : colors.onIconCircle;
+  return (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel={label}
+      style={({ pressed }) => [styles.quickAction, pressed && styles.pressed]}
+      onPress={onPress}
+    >
+      <View style={[styles.quickIcon, tone === "danger" && styles.quickIconDanger]}>
+        <Icon name={icon} color={color} />
+      </View>
+      <Text style={styles.quickLabel} numberOfLines={1}>
+        {label}
+      </Text>
+    </Pressable>
+  );
+}
+
+/** A list row: icon in a circle, title and subtitle, optional trailing text or chevron. */
+export function ListRow({
+  icon,
+  title,
+  subtitle,
+  trailing,
+  onPress,
+  divider = false,
+}: {
+  icon: IconName;
+  title: string;
+  subtitle?: string;
+  trailing?: string;
+  onPress?: () => void;
+  divider?: boolean;
+}) {
+  const content = (
+    <>
+      <View style={styles.rowIcon}>
+        <Icon name={icon} size={20} color={colors.onIconCircle} />
+      </View>
+      <View style={styles.rowText}>
+        <Text style={type.body}>{title}</Text>
+        {subtitle && <Text style={type.small}>{subtitle}</Text>}
+      </View>
+      {trailing && <Text style={styles.rowTrailing}>{trailing}</Text>}
+      {onPress && <Icon name="chevronRight" size={18} color={colors.textMuted} />}
+    </>
+  );
+  const style = [styles.row, divider && styles.rowDivider];
+  return onPress ? (
+    <Pressable
+      accessibilityRole="button"
+      style={({ pressed }) => [...style, pressed && styles.pressed]}
+      onPress={onPress}
+    >
+      {content}
+    </Pressable>
+  ) : (
+    <View style={style}>{content}</View>
   );
 }
 
@@ -46,11 +247,6 @@ export function Card({
   style?: StyleProp<ViewStyle>;
 }) {
   return <View style={[styles.card, style]}>{children}</View>;
-}
-
-/** The dark navy summary card at the top of a screen. */
-export function HeroCard({ children }: { children: ReactNode }) {
-  return <View style={styles.hero}>{children}</View>;
 }
 
 type ButtonVariant = "primary" | "secondary" | "danger";
@@ -91,23 +287,6 @@ export function PillButton({
           {label}
         </Text>
       )}
-    </Pressable>
-  );
-}
-
-/** A grey row with a chevron, like the app's navigation tiles. */
-export function NavTile({ label, detail, onPress }: { label: string; detail?: string; onPress: () => void }) {
-  return (
-    <Pressable
-      accessibilityRole="link"
-      style={({ pressed }) => [styles.tile, pressed && styles.pressed]}
-      onPress={onPress}
-    >
-      <View style={styles.tileText}>
-        <Text style={type.body}>{label}</Text>
-        {detail && <Text style={type.small}>{detail}</Text>}
-      </View>
-      <Text style={styles.chevron}>›</Text>
     </Pressable>
   );
 }
@@ -199,6 +378,95 @@ const noticeTones = StyleSheet.create({
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: colors.background },
   screenContent: { padding: spacing.lg, paddingBottom: 48, gap: spacing.lg },
+  header: { flexDirection: "row", alignItems: "center", gap: spacing.md },
+  headerText: { flex: 1, gap: 2 },
+  headerButton: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: colors.iconCircle,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  badge: {
+    position: "absolute",
+    top: 2,
+    right: 2,
+    minWidth: 18,
+    height: 18,
+    borderRadius: 9,
+    paddingHorizontal: 4,
+    backgroundColor: colors.badge,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  badgeText: { color: colors.onBadge, fontSize: 11, fontWeight: "700" },
+  back: { flexDirection: "row", alignItems: "center", gap: 2, alignSelf: "flex-start" },
+  backText: { fontSize: 16, color: colors.link },
+  paymentCard: {
+    backgroundColor: colors.cardFace,
+    borderRadius: radius.paymentCard,
+    padding: spacing.xl,
+    aspectRatio: 1.586, // ISO/IEC 7810 ID-1, the shape of a real card
+    justifyContent: "space-between",
+    overflow: "hidden",
+  },
+  // A large soft circle in the corner gives the flat navy face some depth.
+  paymentCardGlow: {
+    position: "absolute",
+    width: 260,
+    height: 260,
+    borderRadius: 130,
+    right: -90,
+    top: -110,
+    backgroundColor: colors.cardFaceHighlight,
+    opacity: 0.6,
+  },
+  paymentCardTop: { flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
+  cardChip: { width: 40, height: 30, borderRadius: 6, backgroundColor: colors.cardChip },
+  paymentCardBody: { gap: 2 },
+  paymentCardLabel: { fontSize: 14, color: colors.onHeroMuted },
+  paymentCardValue: { fontSize: 32, fontWeight: "600", color: colors.onHero },
+  paymentCardBottom: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    gap: spacing.md,
+  },
+  paymentCardCaption: {
+    flex: 1,
+    fontSize: 15,
+    letterSpacing: 2,
+    color: colors.onHero,
+  },
+  quickAction: { flex: 1, alignItems: "center", gap: spacing.xs + 2 },
+  quickIcon: {
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    backgroundColor: colors.iconCircle,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  quickIconDanger: { backgroundColor: colors.dangerSurface },
+  quickLabel: { fontSize: 13, color: colors.text },
+  row: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.md,
+    paddingVertical: spacing.md,
+  },
+  rowDivider: { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.border },
+  rowIcon: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: colors.iconCircle,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  rowText: { flex: 1, gap: 2 },
+  rowTrailing: { fontSize: 16, fontWeight: "600", color: colors.text },
   sectionHeader: {
     flexDirection: "row",
     justifyContent: "space-between",
@@ -211,12 +479,6 @@ const styles = StyleSheet.create({
     padding: spacing.lg,
     gap: spacing.sm,
   },
-  hero: {
-    backgroundColor: colors.hero,
-    borderRadius: radius.card,
-    padding: spacing.xl,
-    gap: spacing.xs,
-  },
   pill: {
     minHeight: 48,
     borderRadius: radius.pill,
@@ -228,17 +490,6 @@ const styles = StyleSheet.create({
   pillTextSecondary: { color: colors.text },
   inactive: { opacity: 0.35 },
   pressed: { opacity: 0.75 },
-  tile: {
-    flexDirection: "row",
-    alignItems: "center",
-    backgroundColor: colors.surface,
-    borderRadius: radius.card,
-    paddingVertical: spacing.md,
-    paddingHorizontal: spacing.lg,
-    gap: spacing.md,
-  },
-  tileText: { flex: 1, gap: 2 },
-  chevron: { fontSize: 24, color: colors.textMuted },
   chip: {
     fontSize: 13,
     paddingVertical: 4,

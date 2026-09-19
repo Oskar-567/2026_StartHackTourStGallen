@@ -1,18 +1,20 @@
 import { useRouter } from "expo-router";
 import { useCallback, useEffect, useState } from "react";
-import { StyleSheet, Text, View } from "react-native";
+import { Pressable, StyleSheet, Text, View } from "react-native";
 
 import {
   Card,
   Chip,
-  HeroCard,
-  LargeTitle,
+  Icon,
+  ListRow,
   Loading,
-  NavTile,
   Notice,
+  PaymentCard,
   PillButton,
   ProgressBar,
+  QuickAction,
   Screen,
+  ScreenHeader,
   SectionTitle,
 } from "@/components/ui";
 import {
@@ -100,27 +102,32 @@ export default function ApprovalQueueScreen() {
 
   return (
     <Screen>
-      <LargeTitle>Shopping agent</LargeTitle>
-
-      <HeroCard>
-        <Text style={styles.heroLabel}>Waiting for you</Text>
-        <Text style={styles.heroValue}>{state.kind === "loaded" ? waiting : "–"}</Text>
-        <Text style={styles.heroDetail}>
-          {waiting === 0
-            ? "Your agent's purchases are checked automatically."
-            : "Nothing is paid until you decide."}
-        </Text>
-      </HeroCard>
-
-      <NavTile
-        label="Wallet policy"
-        detail={
-          mandate
-            ? `${statusLabel(mandate.status)}${limit !== null ? ` · up to ${formatChf(limit)} per purchase` : ""}`
-            : "View, tighten or revoke"
-        }
-        onPress={() => router.push("/policy")}
+      <ScreenHeader
+        eyebrow="Hello"
+        title="Shopping agent"
+        icon="bell"
+        badge={waiting}
+        onIconPress={() => router.push("/policy")}
       />
+
+      <PaymentCard
+        label="Limit per purchase"
+        value={limit !== null ? formatChf(limit) : "No limit set"}
+        caption="•••• AGENT"
+        status={mandate && <Chip label={statusLabel(mandate.status)} tone={statusTone(mandate.status)} />}
+      />
+
+      <View style={styles.quickActions}>
+        <QuickAction icon="policy" label="Rules" onPress={() => router.push("/policy")} />
+        <QuickAction icon="shield" label="Tighten" onPress={() => router.push("/policy")} />
+        <QuickAction
+          icon="block"
+          label="Block agent"
+          tone="danger"
+          onPress={() => router.push("/policy")}
+        />
+        <QuickAction icon="status" label="Status" onPress={() => router.push("/status")} />
+      </View>
 
       {lastOutcome && (
         <Notice tone={lastOutcome.answer === "approve" ? "success" : "attention"}>
@@ -130,7 +137,11 @@ export default function ApprovalQueueScreen() {
       )}
       {actionError && <Notice tone="danger">{actionError}</Notice>}
 
-      <SectionTitle>Approvals</SectionTitle>
+      <SectionTitle
+        action={waiting > 0 ? <Chip label={`${waiting} waiting`} tone="attention" /> : undefined}
+      >
+        Confirm payments
+      </SectionTitle>
 
       {state.kind === "loading" && <Loading />}
 
@@ -155,12 +166,12 @@ export default function ApprovalQueueScreen() {
             <Notice tone="attention">Connection problem, retrying: {state.pollError}</Notice>
           )}
           {state.stepUps.length === 0 ? (
-            <Card>
-              <Text style={type.body}>Nothing is waiting for you.</Text>
-              <Text style={type.small}>
-                When the wallet cannot decide a purchase on its own, it pauses it and asks you
-                here.
-              </Text>
+            <Card style={styles.listCard}>
+              <ListRow
+                icon="check"
+                title="All caught up"
+                subtitle="Your agent's purchases are checked automatically. If one needs you, it pauses here and nothing is paid until you decide."
+              />
             </Card>
           ) : (
             state.stepUps.map((stepUp) => (
@@ -176,16 +187,16 @@ export default function ApprovalQueueScreen() {
           )}
         </>
       )}
-
-      <Text style={styles.footerLink} onPress={() => router.push("/status")}>
-        Server status
-      </Text>
     </Screen>
   );
 }
 
 function statusLabel(status: Mandate["status"]): string {
-  return { draft: "Draft, not active yet", active: "Active", revoked: "Revoked" }[status];
+  return { draft: "Not active yet", active: "Active", revoked: "Revoked" }[status];
+}
+
+function statusTone(status: Mandate["status"]): "attention" | "success" | "danger" {
+  return ({ draft: "attention", active: "success", revoked: "danger" } as const)[status];
 }
 
 function StepUpCard({
@@ -205,17 +216,29 @@ function StepUpCard({
     ? Math.max(0, Math.round((Date.parse(stepUp.respond_by) - now) / 1000))
     : 0;
   const expired = secondsLeft === 0;
+  const [showChecks, setShowChecks] = useState(false);
 
   return (
     <Card style={styles.card}>
-      <View style={styles.cardHeader}>
-        <View style={styles.merchantBlock}>
-          <Text style={styles.merchant}>{stepUp.merchant_name ?? "Unknown shop"}</Text>
-          {stepUp.purchase_description && (
-            <Text style={type.secondary}>{stepUp.purchase_description}</Text>
-          )}
+      <View style={styles.confirmTop}>
+        <Text style={styles.confirmLabel}>Payment confirmation</Text>
+        <View style={styles.timer}>
+          <Icon name="timer" size={16} color={expired ? colors.danger : colors.textMuted} />
+          <Text style={expired ? styles.expired : type.small}>
+            {expired ? "Closed" : `${secondsLeft}s`}
+          </Text>
         </View>
-        <Text style={type.amount}>{formatChf(stepUp.billing_amount_chf)}</Text>
+      </View>
+
+      <View style={styles.confirmHero}>
+        <View style={styles.merchantIcon}>
+          <Icon name="bag" size={26} color={colors.onIconCircle} />
+        </View>
+        <Text style={styles.merchant}>{stepUp.merchant_name ?? "Unknown shop"}</Text>
+        {stepUp.purchase_description && (
+          <Text style={type.secondary}>{stepUp.purchase_description}</Text>
+        )}
+        <Text style={type.amountLarge}>{formatChf(stepUp.billing_amount_chf)}</Text>
       </View>
 
       <View style={styles.items}>
@@ -244,19 +267,31 @@ function StepUpCard({
 
       {stepUp.evidence.length > 0 && (
         <View style={styles.block}>
-          <Text style={styles.label}>What the wallet checked</Text>
-          {stepUp.evidence.map((evidence, index) => (
-            <Text key={index} style={styles.evidence}>
-              • {evidence.note}
+          <Pressable
+            accessibilityRole="button"
+            accessibilityState={{ expanded: showChecks }}
+            style={styles.toggle}
+            onPress={() => setShowChecks((shown) => !shown)}
+          >
+            <Text style={styles.toggleText}>
+              {showChecks ? "Hide what the wallet checked" : "Show what the wallet checked"}
             </Text>
-          ))}
+          </Pressable>
+          {showChecks &&
+            stepUp.evidence.map((evidence, index) => (
+              <Text key={index} style={styles.evidence}>
+                • {evidence.note}
+              </Text>
+            ))}
         </View>
       )}
 
       <View style={styles.block}>
         <ProgressBar fraction={secondsLeft / HUMAN_WINDOW_SECONDS} />
         <Text style={expired ? styles.expired : type.small}>
-          {expired ? "Answer window closed" : `${secondsLeft}s left to answer`}
+          {expired
+            ? "Answer window closed"
+            : `${secondsLeft}s left to answer. Nothing is paid until you decide.`}
         </Text>
       </View>
 
@@ -292,15 +327,27 @@ function useNow(): number {
 }
 
 const styles = StyleSheet.create({
-  heroLabel: { fontSize: 18, fontWeight: "500", color: colors.onHero },
-  heroValue: { fontSize: 44, fontWeight: "600", color: colors.onHero },
-  heroDetail: { fontSize: 15, color: colors.onHeroMuted },
-  card: { gap: spacing.md },
-  cardHeader: { flexDirection: "row", justifyContent: "space-between", gap: spacing.md },
-  merchantBlock: { flex: 1, gap: 2 },
-  merchant: { fontSize: 18, fontWeight: "600", color: colors.text },
+  quickActions: { flexDirection: "row", justifyContent: "space-between", gap: spacing.sm },
+  listCard: { paddingVertical: spacing.xs },
+  card: { gap: spacing.md, backgroundColor: colors.surfaceRaised, borderWidth: 1, borderColor: colors.border },
+  confirmTop: { flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
+  confirmLabel: { fontSize: 13, fontWeight: "600", color: colors.textMuted, letterSpacing: 0.3 },
+  timer: { flexDirection: "row", alignItems: "center", gap: 4 },
+  confirmHero: { alignItems: "center", gap: spacing.xs, paddingVertical: spacing.sm },
+  merchantIcon: {
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    backgroundColor: colors.iconCircle,
+    alignItems: "center",
+    justifyContent: "center",
+    marginBottom: spacing.xs,
+  },
+  merchant: { fontSize: 18, fontWeight: "600", color: colors.text, textAlign: "center" },
+  toggle: { alignSelf: "flex-start", paddingVertical: 2 },
+  toggleText: { fontSize: 15, color: colors.link },
   items: {
-    backgroundColor: colors.surfaceRaised,
+    backgroundColor: colors.surface,
     borderRadius: 12,
     padding: spacing.md,
     gap: spacing.sm,
@@ -315,5 +362,4 @@ const styles = StyleSheet.create({
   expired: { fontSize: 13, color: colors.danger },
   actions: { flexDirection: "row", gap: spacing.md },
   action: { flex: 1 },
-  footerLink: { fontSize: 14, color: colors.link, textAlign: "center", marginTop: spacing.lg },
 });

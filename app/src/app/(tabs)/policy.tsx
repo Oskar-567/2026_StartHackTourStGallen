@@ -5,12 +5,13 @@ import {
   Card,
   Chip,
   ConfirmSheet,
-  HeroCard,
-  LargeTitle,
+  ListRow,
   Loading,
   Notice,
+  PaymentCard,
   PillButton,
   Screen,
+  ScreenHeader,
   SectionTitle,
 } from "@/components/ui";
 import {
@@ -77,7 +78,7 @@ export default function PolicyScreen() {
   if (state.kind === "loading") {
     return (
       <Screen>
-        <LargeTitle>Wallet policy</LargeTitle>
+        <ScreenHeader eyebrow="Shopping agent" title="Wallet policy" />
         <Loading />
       </Screen>
     );
@@ -86,7 +87,7 @@ export default function PolicyScreen() {
   if (state.kind === "failed") {
     return (
       <Screen>
-        <LargeTitle>Wallet policy</LargeTitle>
+        <ScreenHeader eyebrow="Shopping agent" title="Wallet policy" />
         <Card>
           <Text style={type.body}>Could not load your policy.</Text>
           <Text style={type.small}>{state.message}</Text>
@@ -106,7 +107,7 @@ export default function PolicyScreen() {
   if (state.mandates.length === 0) {
     return (
       <Screen>
-        <LargeTitle>Wallet policy</LargeTitle>
+        <ScreenHeader eyebrow="Shopping agent" title="Wallet policy" />
         <Card>
           <Text style={type.body}>No wallet policy yet.</Text>
         </Card>
@@ -121,16 +122,18 @@ export default function PolicyScreen() {
 
   return (
     <Screen>
-      <LargeTitle>Wallet policy</LargeTitle>
+      <ScreenHeader eyebrow="Shopping agent" title="Wallet policy" />
 
-      <HeroCard>
-        <View style={styles.heroTop}>
-          <Text style={styles.heroLabel}>Limit per purchase</Text>
-          <StatusChip status={mandate.status} />
-        </View>
-        <Text style={styles.heroValue}>{limit !== null ? formatChf(limit) : "No limit"}</Text>
-        <Text style={styles.heroDetail}>{UNCERTAINTY_DESCRIPTIONS[mandate.uncertainty_policy]}</Text>
-      </HeroCard>
+      <PaymentCard
+        label="Limit per purchase"
+        value={limit !== null ? formatChf(limit) : "No limit"}
+        caption="•••• AGENT"
+        status={<StatusChip status={mandate.status} />}
+      />
+
+      <Card style={styles.listCard}>
+        <ListRow icon="shield" title={UNCERTAINTY_DESCRIPTIONS[mandate.uncertainty_policy]} />
+      </Card>
 
       {feedback && <Notice tone={feedback.tone}>{feedback.text}</Notice>}
 
@@ -155,17 +158,15 @@ export default function PolicyScreen() {
       </Card>
 
       <SectionTitle>What the wallet enforces</SectionTitle>
-      <Card>
+      <Card style={styles.listCard}>
         {mandate.hard_rules.length === 0 ? (
-          <Text style={type.secondary}>No fixed rules.</Text>
+          <Text style={[type.secondary, styles.rulesEmpty]}>No fixed rules.</Text>
         ) : (
           mandate.hard_rules.map((rule, index) => (
-            <View key={index} style={[styles.rule, index > 0 && styles.ruleDivider]}>
-              <Text style={type.body}>{describeRule(rule)}</Text>
-            </View>
+            <ListRow key={index} icon="rule" title={describeRule(rule)} divider={index > 0} />
           ))
         )}
-        <Text style={type.small}>
+        <Text style={[type.small, styles.rulesNote]}>
           Checked on every purchase, together with what you asked for and whether the shop and
           item match it.
         </Text>
@@ -355,13 +356,10 @@ function TightenPanel({
 }
 
 const styles = StyleSheet.create({
-  heroTop: { flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
-  heroLabel: { fontSize: 18, fontWeight: "500", color: colors.onHero },
-  heroValue: { fontSize: 40, fontWeight: "600", color: colors.onHero },
-  heroDetail: { fontSize: 15, color: colors.onHeroMuted },
+  listCard: { paddingVertical: spacing.xs },
   quote: { fontSize: 17, fontStyle: "italic", color: colors.text, lineHeight: 24 },
-  rule: { paddingVertical: spacing.sm },
-  ruleDivider: { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.border },
+  rulesEmpty: { paddingVertical: spacing.md },
+  rulesNote: { paddingBottom: spacing.md },
   questions: { backgroundColor: colors.attentionSurface },
   panel: { gap: spacing.md },
   row: { flexDirection: "row", gap: spacing.sm, alignItems: "center" },

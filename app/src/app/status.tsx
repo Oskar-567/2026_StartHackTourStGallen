@@ -1,7 +1,8 @@
+import { useRouter } from "expo-router";
 import { useCallback, useEffect, useState } from "react";
 import { StyleSheet, Text, View } from "react-native";
 
-import { Card, Chip, LargeTitle, Loading, PillButton, Screen } from "@/components/ui";
+import { BackLink, Card, Chip, LargeTitle, Loading, PillButton, Screen } from "@/components/ui";
 import { API_URL, errorMessage, fetchHealth, type Health } from "@/services/api";
 import { type } from "@/theme";
 
@@ -11,6 +12,7 @@ type HealthState =
   | { kind: "failed"; message: string };
 
 export default function HealthScreen() {
+  const router = useRouter();
   const [state, setState] = useState<HealthState>({ kind: "loading" });
 
   const load = useCallback(
@@ -33,6 +35,8 @@ export default function HealthScreen() {
 
   return (
     <Screen>
+      {/* Opened on top of the tabs; a deep link on web has nothing to go back to. */}
+      <BackLink onPress={() => (router.canGoBack() ? router.back() : router.replace("/"))} />
       <LargeTitle>Server status</LargeTitle>
       <Text style={type.small}>{API_URL}</Text>
 
