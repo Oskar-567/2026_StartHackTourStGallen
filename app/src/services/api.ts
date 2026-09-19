@@ -131,3 +131,61 @@ export function errorMessage(error: unknown): string {
   }
   return error instanceof Error ? error.message : String(error);
 }
+
+// --- Wallet policy (mandates) ------------------------------------------------
+
+export type HardRule = {
+  field: string;
+  operator: "<" | "<=" | "=" | "!=" | ">" | ">=" | "in" | "not_in";
+  value: number | string | string[];
+  currency?: string | null;
+  scope?: "purchase" | "period" | null;
+  period_days?: number | null;
+};
+
+export type UncertaintyPolicy = "ask" | "decline" | "approve";
+
+/** `GET /api/mandates/` — the customer's wallet policy as stored by our server. */
+export type Mandate = {
+  id: number;
+  instruction: string;
+  hard_rules: HardRule[];
+  uncertainty_policy: UncertaintyPolicy;
+  guidance: string[];
+  open_questions: string[];
+  status: "draft" | "active" | "revoked";
+  draft_id: string;
+  mandate_id: string;
+  confirmed_by: string;
+  confirmed_at: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+/** Additive only: existing rules must be resent unchanged; the server refuses anything weaker. */
+export type MandateTightening = {
+  hard_rules?: HardRule[];
+  uncertainty_policy?: UncertaintyPolicy;
+};
+
+export function fetchMandates(): Promise<Mandate[]> {
+  return request<Mandate[]>("/api/mandates/");
+}
+
+export function confirmMandate(id: number, confirmedBy = "customer (app)"): Promise<Mandate> {
+  return request<Mandate>(`/api/mandates/${id}/confirm/`, {
+    method: "POST",
+    body: JSON.stringify({ confirmed_by: confirmedBy }),
+  });
+}
+
+export function tightenMandate(id: number, change: MandateTightening): Promise<Mandate> {
+  return request<Mandate>(`/api/mandates/${id}/tighten/`, {
+    method: "POST",
+    body: JSON.stringify(change),
+  });
+}
+
+export function revokeMandate(id: number): Promise<Mandate> {
+  return request<Mandate>(`/api/mandates/${id}/revoke/`, { method: "POST" });
+}

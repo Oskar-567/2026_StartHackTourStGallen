@@ -71,6 +71,10 @@ export default function ApprovalQueueScreen() {
     <ScrollView contentContainerStyle={styles.container}>
       <Stack.Screen options={{ title: "Approvals" }} />
 
+      <Link href="/policy" style={styles.policyLink}>
+        View or change your wallet policy →
+      </Link>
+
       <Text style={styles.intro}>
         Purchases your shopping agent wants to make that the wallet could not approve on its own.
         Nothing is paid until you decide.
@@ -278,5 +282,6 @@ const styles = StyleSheet.create({
   success: { fontSize: 15, color: "#1b7f3b" },
   warning: { fontSize: 14, color: "#7a4a00" },
   error: { fontSize: 15, color: "#b00020" },
+  policyLink: { fontSize: 15, fontWeight: "600", color: "#208AEF" },
   link: { marginTop: 16, fontSize: 14, color: "#208AEF", textAlign: "center" },
 });
