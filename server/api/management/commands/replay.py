@@ -125,6 +125,14 @@ _SCENARIO_POLICIES: dict[str, dict[str, Any]] = {
                 "value": "true",
                 "scope": "purchase",
             },
+            # "Buy only from a specialist sports retailer": the shop's own category,
+            # a structured platform field -- not something read from merchant text.
+            {
+                "field": "authorization.merchant.merchant_category",
+                "operator": "in",
+                "value": ["sporting_goods"],
+                "scope": "purchase",
+            },
         ],
         "uncertainty_policy": "ask",
         "intent_spec": {
@@ -138,6 +146,8 @@ _SCENARIO_POLICIES: dict[str, dict[str, Any]] = {
             "minimum_attributes": {"return_days": 14},
             # "Replace my worn road-running shoes" -- one pair, not a subscription.
             "fulfilment": "single",
+            # ...and road-running, so a trail-running shoe is a substitute to ask about.
+            "item_type": "road-running shoe",
         },
     },
     "SCEN0003": {
@@ -476,6 +486,13 @@ class Command(BaseCommand):
 
         extractor = build_extractor(options.get("facts_backend"))
         self.stdout.write(f"Fact extraction: {extractor.name}")
+        # Load the model before the first purchase: otherwise the first
+        # extraction pays the model load and times out, and purchase 1 is
+        # decided without facts.
+        warm_up = getattr(extractor, "warm_up", None)
+        if callable(warm_up):
+            loaded = warm_up()
+            self.stdout.write(f"Model warm-up: {'ok' if loaded else 'FAILED (see log)'}")
         self.stdout.write("-" * 100)
 
         lines_seen = lines_with_attributes = lines_with_category = 0

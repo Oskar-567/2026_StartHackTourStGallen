@@ -25,7 +25,10 @@ Verdicts:
   required. Size 44 against a required size 43 is a definite mismatch, and so
   is a 7-day return window against a required minimum of 14.
 - **UNCERTAIN** -- no facts at all, or the required attribute simply was not
-  found in the merchant's text. Absence is not agreement.
+  found in the merchant's text. Absence is not agreement. Also when the
+  extracted product type does not contain every word of
+  `intent_spec.item_type`: "trail-running shoe" against "road-running shoe" is
+  a possible substitute, which only the customer can accept or reject.
 - **PASS** -- every required attribute was found and matches.
 
 A mandate with no `required_attributes` has nothing to check here, so it
@@ -37,6 +40,8 @@ this package. The function itself stays pure.
 """
 
 from __future__ import annotations
+
+import re
 
 from engine import reasons
 from engine.types import (
@@ -82,12 +87,29 @@ def _normalise(value: str) -> str:
     return " ".join(value.lower().split())
 
 
+def _type_words(value: str) -> frozenset[str]:
+    """The words of a product type, lower-cased and singular.
+
+    "Road-running shoes" and "road running shoe" give the same set. Anything
+    subtler -- synonyms, translations -- is not attempted: a miss here costs one
+    question to the customer, a false match would approve a substitute.
+    """
+    words = re.split(r"[^a-z0-9]+", value.lower())
+    return frozenset(
+        word[:-1] if len(word) > 3 and word.endswith("s") and not word.endswith("ss") else word
+        for word in words
+        if word
+    )
+
+
 def check(
     event: AuthorizationEvent, state: EngineState, facts: ExtractedFacts | None = None
 ) -> CheckResult:
     intent = event.mandate.intent_spec
 
-    if intent is None or not (intent.required_attributes or intent.minimum_attributes):
+    if intent is None or not (
+        intent.required_attributes or intent.minimum_attributes or intent.item_type
+    ):
         return CheckResult(
             verdict=Verdict.PASS,
             reason_code=None,
@@ -107,6 +129,7 @@ def check(
                     note=(
                         "no extracted facts available; required attributes "
                         f"{sorted({**intent.required_attributes, **intent.minimum_attributes})} "
+                        f"and item type {intent.item_type!r} "
                         "could not be confirmed"
                     ),
                 ),
@@ -115,6 +138,8 @@ def check(
 
     mismatches: list[Evidence] = []
     unknowns: list[Evidence] = []
+    substitutes: list[Evidence] = []
+    wanted_words = _type_words(intent.item_type) if intent.item_type else frozenset()
 
     for item in event.items:
         item_facts = facts.for_line(item.line_no)
@@ -169,12 +194,45 @@ def check(
                     )
                 )
 
+        if wanted_words:
+            offered = None if item_facts is None else item_facts.attributes.get("type")
+            if offered is None:
+                unknowns.append(
+                    Evidence(
+                        field=f"items[{item.line_no}].type",
+                        value=None,
+                        note=(
+                            f"the customer asked for {intent.item_type!r}, but the shop "
+                            f"supplied nothing we could read the product type from "
+                            f"(facts source: {facts.source})"
+                        ),
+                    )
+                )
+            elif not wanted_words <= _type_words(offered):
+                substitutes.append(
+                    Evidence(
+                        field=f"items[{item.line_no}].type",
+                        value=offered,
+                        note=(
+                            f"the customer asked for {intent.item_type!r}, but this item is "
+                            f"{offered!r} -- possibly a substitute"
+                        ),
+                    )
+                )
+
     if mismatches:
         return CheckResult(
             verdict=Verdict.FAIL,
             reason_code=reasons.ITEM_MATCH_ATTRIBUTE_MISMATCH,
             message="This is not the item the customer asked for.",
-            evidence=tuple(mismatches + unknowns),
+            evidence=tuple(mismatches + substitutes + unknowns),
+        )
+    if substitutes:
+        return CheckResult(
+            verdict=Verdict.UNCERTAIN,
+            reason_code=reasons.ITEM_MATCH_POSSIBLE_SUBSTITUTE,
+            message="This may be a substitute for what the customer asked for.",
+            evidence=tuple(substitutes + unknowns),
         )
     if unknowns:
         return CheckResult(

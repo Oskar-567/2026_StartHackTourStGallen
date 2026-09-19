@@ -46,6 +46,13 @@ KV-cache memory on a machine that is also running Postgres, Django and the app.
 Raise this only if a basket ever gets long enough to be truncated.
 """
 
+WARM_UP_TIMEOUT_SECONDS = 120.0
+"""How long the startup warm-up may wait for the model to load.
+
+Separate from `timeout_seconds`, which guards each extraction against the
+decision deadline. A 7B model can take well over that to come off disk.
+"""
+
 NUM_PREDICT = 512
 """Hard cap on generated tokens.
 
@@ -77,12 +84,16 @@ class OllamaExtractor:
         # stop sending it, rather than failing every extraction over a keyword.
         self._send_think = True
         self._client = Client(host=host, timeout=timeout_seconds)
+        # Loading a model from disk takes longer than one extraction is allowed
+        # to. The warm-up runs before any deadline exists, so it may wait.
+        self._warm_up_client = Client(host=host, timeout=WARM_UP_TIMEOUT_SECONDS)
 
-    def _chat(self, messages: list[dict[str, str]], **kwargs):
+    def _chat(self, messages: list[dict[str, str]], client=None, **kwargs):
         """One chat call, tolerating a client that predates `think`."""
+        client = client or self._client
         if self._send_think:
             try:
-                return self._client.chat(
+                return client.chat(
                     model=self._model, messages=messages, think=self._think, **kwargs
                 )
             except TypeError:
@@ -92,7 +103,7 @@ class OllamaExtractor:
                     self.name,
                 )
                 self._send_think = False
-        return self._client.chat(model=self._model, messages=messages, **kwargs)
+        return client.chat(model=self._model, messages=messages, **kwargs)
 
     def warm_up(self) -> bool:
         """Load the model before the first real purchase arrives.
@@ -104,6 +115,7 @@ class OllamaExtractor:
         try:
             self._chat(
                 [{"role": "user", "content": "ok"}],
+                client=self._warm_up_client,
                 keep_alive=self._keep_alive,
                 options={"num_predict": 1, "num_ctx": NUM_CTX},
             )

@@ -284,12 +284,16 @@ def _parse_intent_spec(raw: Any, path: str) -> IntentSpec | None:
     fulfilment = raw.get("fulfilment")
     if fulfilment not in (None, "single", "recurring"):
         _fail(path, "'fulfilment' must be 'single', 'recurring' or absent")
+    item_type = raw.get("item_type")
+    if item_type is not None and (not isinstance(item_type, str) or not item_type.strip()):
+        _fail(path, "'item_type' must be a non-empty string or absent")
     return IntentSpec(
         purpose=purpose,
         allowed_item_categories=frozenset(categories),
         required_attributes=dict(attributes),
         minimum_attributes={k: float(v) for k, v in minimums.items()},
         fulfilment=fulfilment,
+        item_type=item_type,
     )
 
 

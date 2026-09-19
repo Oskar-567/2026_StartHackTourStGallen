@@ -15,8 +15,12 @@ HARD_RULE_VALUE_UNKNOWN = "hard_rule_value_unknown"
 # is a known, legitimate value and never uses this code.
 
 # -- checks/amount.py: mandate hard_rules with scope="purchase" (default) --
+# The failing rule's field picks the code, so a shop outside the customer's
+# chosen kind of retailer is not reported as a spending-limit breach.
 AMOUNT_LIMIT_EXCEEDED = "amount_limit_exceeded"
 AMOUNT_RULE_UNCERTAIN = "amount_rule_uncertain"
+MERCHANT_NOT_PERMITTED = "merchant_not_permitted"
+HARD_RULE_VIOLATED = "hard_rule_violated"
 
 # -- checks/period.py: mandate hard_rules with scope="period" --
 PERIOD_LIMIT_EXCEEDED = "period_limit_exceeded"
@@ -51,6 +55,7 @@ ITEM_MATCH_FACTS_UNAVAILABLE = "item_match_facts_unavailable"
 ITEM_MATCH_ATTRIBUTE_MISMATCH = "item_match_attribute_mismatch"
 ITEM_MATCH_ATTRIBUTE_UNKNOWN = "item_match_attribute_unknown"
 ITEM_MATCH_BELOW_MINIMUM = "item_match_below_minimum"
+ITEM_MATCH_POSSIBLE_SUBSTITUTE = "item_match_possible_substitute"
 
 # -- checks/purpose_fit.py (stub) --
 PURPOSE_FIT_FACTS_UNAVAILABLE = "purpose_fit_facts_unavailable"

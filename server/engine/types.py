@@ -217,6 +217,16 @@ class IntentSpec:
     the second as the first would reject a 30-day return window for not being
     the string "14"."""
 
+    item_type: str | None = None
+    """The kind of product asked for, e.g. `"road-running shoe"`.
+
+    Catches the substitution no attribute can: a trail-running shoe in size 43
+    with a 30-day return window matches every attribute and is still not what
+    the customer asked for. `checks/item_match.py` compares its words against
+    the extracted `type`; a difference is a question for the customer, never a
+    refusal, because wording varies and only the customer knows whether the
+    substitute will do."""
+
 
 @dataclass(frozen=True, slots=True)
 class Mandate:

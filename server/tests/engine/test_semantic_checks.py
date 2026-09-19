@@ -7,6 +7,7 @@ tests below pin down that merchant-supplied text cannot reach the decision.
 
 from __future__ import annotations
 
+from engine import reasons
 from engine.checks import item_match, purpose_fit
 from engine.types import ExtractedFacts, ItemFacts, Verdict
 
@@ -73,6 +74,48 @@ class TestItemMatch:
         event = event_factory(mandate={"intent_spec": {"required_attributes": {"colour": "Black"}}})
         facts = _facts(ItemFacts(line_no=1, attributes={"colour": "  black "}))
         assert item_match.check(event, empty_state, facts).verdict is Verdict.PASS
+
+
+_ROAD_SHOE_INTENT = {
+    "allowed_item_categories": ["sporting_goods"],
+    "required_attributes": {"size": "43"},
+    "item_type": "road-running shoe",
+}
+
+
+class TestItemType:
+    """A substitute can match every attribute and still not be what was asked for."""
+
+    def test_same_type_in_other_words_passes(self, event_factory, empty_state) -> None:
+        event = event_factory(mandate={"intent_spec": _ROAD_SHOE_INTENT})
+        facts = _facts(
+            ItemFacts(line_no=1, attributes={"size": "43", "type": "Road running shoes"})
+        )
+        assert item_match.check(event, empty_state, facts).verdict is Verdict.PASS
+
+    def test_a_different_type_is_a_question_not_a_refusal(self, event_factory, empty_state) -> None:
+        event = event_factory(mandate={"intent_spec": _ROAD_SHOE_INTENT})
+        facts = _facts(
+            ItemFacts(line_no=1, attributes={"size": "43", "type": "Trail-running shoe"})
+        )
+        result = item_match.check(event, empty_state, facts)
+        assert result.verdict is Verdict.UNCERTAIN
+        assert result.reason_code == reasons.ITEM_MATCH_POSSIBLE_SUBSTITUTE
+        assert result.evidence[0].value == "Trail-running shoe"
+
+    def test_an_unreadable_type_is_uncertain(self, event_factory, empty_state) -> None:
+        event = event_factory(mandate={"intent_spec": _ROAD_SHOE_INTENT})
+        facts = _facts(ItemFacts(line_no=1, attributes={"size": "43"}))
+        result = item_match.check(event, empty_state, facts)
+        assert result.verdict is Verdict.UNCERTAIN
+        assert result.reason_code == reasons.ITEM_MATCH_ATTRIBUTE_UNKNOWN
+
+    def test_a_wrong_attribute_still_fails_alongside_a_substitute(
+        self, event_factory, empty_state
+    ) -> None:
+        event = event_factory(mandate={"intent_spec": _ROAD_SHOE_INTENT})
+        facts = _facts(ItemFacts(line_no=1, attributes={"size": "M", "type": "Cycling helmet"}))
+        assert item_match.check(event, empty_state, facts).verdict is Verdict.FAIL
 
 
 class TestPurposeFit:

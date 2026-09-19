@@ -13,6 +13,15 @@ The data dictionary also warns that "at least one pair of merchants has
 deliberately similar names" -- i.e. two *legitimate* merchants can look
 alike -- so a close name match raises UNCERTAIN (ask the customer), never a
 hard FAIL, to avoid punishing a genuine near-namesake merchant.
+
+**A new shop the customer's own rules vouch for is not a question.** When the
+mandate names what kind of merchant is allowed ("only a specialist sports
+retailer" -> a rule on `authorization.merchant.merchant_category`) and this
+merchant satisfies every such rule, "we have not bought here before" adds
+nothing the customer has not already answered. Asking anyway would step up the
+very purchase the brief describes as "an unfamiliar but fully compliant
+seller". Lookalike names and an unfamiliar country still raise UNCERTAIN: a
+category rule says nothing about either.
 """
 
 from __future__ import annotations
@@ -20,9 +29,26 @@ from __future__ import annotations
 from difflib import SequenceMatcher
 
 from engine import reasons
+from engine.checks._hard_rule_engine import evaluate_rule, rule_scope
 from engine.types import AuthorizationEvent, CheckResult, EngineState, Evidence, Verdict
 
 _LOOKALIKE_RATIO_THRESHOLD = 0.82
+
+
+def _merchant_vouched_for_by_policy(event: AuthorizationEvent) -> bool:
+    """True when the mandate constrains the merchant and this one meets every constraint.
+
+    Only purchase-scoped rules on `authorization.merchant.*` count. A rule that
+    cannot be evaluated counts as not met -- vouching must be definite.
+    """
+    merchant_rules = [
+        rule
+        for rule in event.mandate.hard_rules
+        if rule.field.startswith("authorization.merchant.") and rule_scope(rule) == "purchase"
+    ]
+    return bool(merchant_rules) and all(
+        evaluate_rule(event, rule)[0] is True for rule in merchant_rules
+    )
 
 
 def check(
@@ -82,6 +108,15 @@ def check(
             verdict=Verdict.UNCERTAIN,
             reason_code=reasons.MERCHANT_LOOKALIKE_NAME,
             message="This merchant's name closely resembles one the customer has used before.",
+            evidence=tuple(evidence),
+        )
+    if unfamiliar_merchant and not unfamiliar_country and _merchant_vouched_for_by_policy(event):
+        return CheckResult(
+            verdict=Verdict.PASS,
+            reason_code=None,
+            message=(
+                "New merchant on this card, but it meets every merchant rule the customer set."
+            ),
             evidence=tuple(evidence),
         )
     if unfamiliar_merchant or unfamiliar_country:
