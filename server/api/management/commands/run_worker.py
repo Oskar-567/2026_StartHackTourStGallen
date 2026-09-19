@@ -5,7 +5,7 @@ Outline (mirrors `technical_details.md` step 6, "Prepare your worker, then
 start a run"):
 
     while the run has work remaining:
-        poll GET /v1/decision-requests/next?wait=25
+        poll GET /v1/decision-requests/next?wait=POLL_WAIT_SECONDS
         204 -> check run progress, keep polling
         error -> handled before reading any purchase data
         validate the envelope's `data` against the event schema
@@ -21,6 +21,11 @@ Non-negotiable watchdog: if there is not enough real-clock margin left
 before `deadline_at` to safely run the full engine, submit the best decision
 available from the deterministic tier alone (no semantic/LLM tier) rather
 than risk missing the deadline.
+
+Fact extraction (`FACTS_BACKEND`) runs before `decide()` only when the margin
+covers its whole timeout plus the watchdog margin; otherwise the engine decides
+without facts, which makes the semantic checks ask rather than guess. The model
+is warmed at startup so the first purchase does not pay the model load.
 """
 
 from __future__ import annotations
@@ -28,23 +33,31 @@ from __future__ import annotations
 import logging
 import sys
 import time
+from datetime import timedelta
 
+from django.conf import settings
 from django.core.management.base import BaseCommand, CommandError
 from django.utils import timezone
 
 from api import services
+from api.demo_output import DemoOutput
 from api.models import AuthorizationRecord, Decision, Mandate, Run
-from engine.aggregate import combine
-from engine.checks import DETERMINISTIC_CHECKS
+from api.reference_policies import REFERENCE_POLICIES
 from engine.decide import ENGINE_VERSION, decide
 from engine.parsing import EventParsingError, parse_event
-from engine.types import AuthorizationEvent, EngineState
+from engine.types import AuthorizationEvent, EngineState, ExtractedFacts
 from engine.types import Decision as EngineDecision
+from facts import FactExtractor, build_extractor, extract_for_event
 from viseca.client import VisecaAPIError, VisecaConnectionError
 
 logger = logging.getLogger("viseca.worker")
 
-POLL_WAIT_SECONDS = 25
+#: Long-poll wait. Short on purpose: customer answers are forwarded between
+#: polls, so this is the worst-case delay before a step-up answer reaches the
+#: API -- and the human window is only 120s. A 25s wait once let an answer given
+#: with 17s to spare arrive after the window closed. Purchases are unaffected:
+#: the API returns as soon as one is queued, whatever the wait.
+POLL_WAIT_SECONDS = 2
 #: Minimum real-clock seconds before `deadline_at` required to run the full
 #: (deterministic + semantic) engine. Below this, the watchdog submits the
 #: deterministic tier's own verdict instead of risking the 8s deadline.
@@ -52,6 +65,8 @@ WATCHDOG_MARGIN_SECONDS = 2.0
 #: When a poll or a network call fails outright, back off briefly before
 #: retrying rather than spinning a hot loop against a down API.
 ERROR_BACKOFF_SECONDS = 1.0
+#: Run statuses after which no further purchases will arrive.
+RUN_FINISHED_STATUSES = frozenset({"completed", "failed", "cancelled", "expired"})
 
 
 def _configure_logging() -> None:
@@ -64,11 +79,16 @@ def _configure_logging() -> None:
     root.setLevel(logging.INFO)
 
 
-def _deterministic_only_decision(event: AuthorizationEvent, state: EngineState) -> EngineDecision:
-    """The watchdog's fallback: the deterministic tier's own verdict, with no
-    semantic/LLM-backed checks run at all."""
-    results = [check(event, state, None) for check in DETERMINISTIC_CHECKS]
-    return combine(results, event.mandate.uncertainty_policy, ENGINE_VERSION)
+def _decision_without_facts(event: AuthorizationEvent, state: EngineState) -> EngineDecision:
+    """The watchdog's fallback: every check, but no fact extraction.
+
+    Only the model is slow; the checks themselves are code and take
+    milliseconds. Skipping the semantic checks too once turned "size unknown,
+    ask" into "nothing to object to, approve" and approved a size-42 shoe for a
+    size-43 customer. Without facts the semantic checks answer UNCERTAIN, which
+    is exactly the honest answer when there was no time to read the listing.
+    """
+    return decide(event, state, None)
 
 
 def _fallback_step_up(event: AuthorizationEvent) -> EngineDecision:
@@ -85,6 +105,34 @@ def _fallback_step_up(event: AuthorizationEvent) -> EngineDecision:
     )
 
 
+def _require_matching_policy(scenario_id: str, mandate: Mandate) -> None:
+    """Refuse a run whose mandate was written for a different scenario.
+
+    Easy to do by accident -- mandate IDs are just numbers -- and the result looks
+    like an engine bug: every purchase judged against someone else's instruction.
+    Scenarios without a reference policy are not checked.
+    """
+    reference = REFERENCE_POLICIES.get(scenario_id)
+    if reference is None or reference["instruction"] == mandate.instruction:
+        return
+    matching = [
+        m.pk
+        for m in Mandate.objects.filter(
+            status=Mandate.Status.ACTIVE, instruction=reference["instruction"]
+        )
+    ]
+    hint = (
+        f"Active mandate(s) for {scenario_id}: {matching}."
+        if matching
+        else f"Create one with: create_mandate --scenario {scenario_id}."
+    )
+    raise CommandError(
+        f"Mandate {mandate.pk} was written for a different instruction "
+        f"({mandate.instruction[:60]!r}...), not {scenario_id}'s. {hint} "
+        "Pass --any-policy to run it anyway."
+    )
+
+
 class Command(BaseCommand):
     help = "Long-polls the challenge API and decides each proposed purchase within its deadline."
 
@@ -94,6 +142,17 @@ class Command(BaseCommand):
         # same run_id don't need a DB lookup every time. None until `handle()`
         # starts a run, or a test calls `_handle_envelope`/`_reconcile` directly.
         self._run: Run | None = None
+        # Built on first use so tests that drive `_handle_envelope` directly get
+        # the configured backend too; `handle()` builds and warms it up front.
+        self._extractor: FactExtractor | None = None
+        # Set by --pretty: readable per-purchase output for a live demo.
+        self._out: DemoOutput | None = None
+        self._facts_note: str | None = None
+
+    def _get_extractor(self) -> FactExtractor:
+        if self._extractor is None:
+            self._extractor = build_extractor()
+        return self._extractor
 
     def add_arguments(self, parser) -> None:
         parser.add_argument(
@@ -106,6 +165,19 @@ class Command(BaseCommand):
             help="Local Mandate primary key (must be active) to bind a new --scenario run to.",
         )
         parser.add_argument(
+            "--any-policy",
+            action="store_true",
+            help=(
+                "Allow a mandate whose instruction differs from the scenario's reference "
+                "policy (e.g. to see how one policy judges another scenario's purchases)."
+            ),
+        )
+        parser.add_argument(
+            "--pretty",
+            action="store_true",
+            help="Readable demo output (one block per purchase) instead of the log lines.",
+        )
+        parser.add_argument(
             "--once",
             action="store_true",
             help="Process a single poll cycle then exit (useful for scripts/tests).",
@@ -113,6 +185,11 @@ class Command(BaseCommand):
 
     def handle(self, *args, **options) -> None:
         _configure_logging()
+        if options.get("pretty"):
+            self._out = DemoOutput()
+            # The key=value log would interleave with the story; keep only errors.
+            logging.getLogger("viseca").setLevel(logging.ERROR)
+            logging.getLogger("facts").setLevel(logging.ERROR)
         client = services.get_client()
 
         scenario_id = options.get("scenario_id")
@@ -127,9 +204,23 @@ class Command(BaseCommand):
                 raise CommandError(
                     f"Mandate {mandate_pk} is not active (status={mandate.status!r})."
                 )
+            if not options.get("any_policy"):
+                _require_matching_policy(scenario_id, mandate)
+
+        # Load the model BEFORE starting the run: the run's first purchase is
+        # queued at once and its 8 s deadline starts then. Warming up after the
+        # start once let the first purchase expire while the model loaded.
+        extractor = self._get_extractor()
+        warm_up = getattr(extractor, "warm_up", None)
+        warmed = warm_up() if callable(warm_up) else None
+        logger.info("facts_backend=%s warm_up=%s", extractor.name, warmed)
+
+        if scenario_id:
             self._run = self._start_run(client, scenario_id, mandate)
 
         logger.info("worker_starting run_id=%s", self._run.run_id if self._run else "<resuming>")
+        if self._out is not None and self._run is not None:
+            self._out.header(scenario_id, self._run.mandate, extractor.name, self._run.run_id)
 
         while True:
             self._forward_pending_resolutions(client)
@@ -137,6 +228,8 @@ class Command(BaseCommand):
             if envelope is None:
                 if self._run is not None and self._run_finished(client, self._run):
                     logger.info("run_complete run_id=%s", self._run.run_id)
+                    if self._out is not None:
+                        self._out.summary(self._run.event_counters)
                     break
                 if once:
                     break
@@ -156,23 +249,36 @@ class Command(BaseCommand):
             mandate=mandate,
             status=Run.Status.RUNNING,
             started_at=timezone.now(),
-            event_counters=response.get("event_counters", {}) or {},
+            event_counters=response.get("counters", {}) or {},
         )
 
     def _run_finished(self, client, run: Run) -> bool:
+        """Whether the challenge API reports the run as over.
+
+        `GET /v1/scenario-runs/{id}` returns `status` ("completed" when every
+        purchase is settled, including step-ups the customer answered or that
+        timed out) and `counters` (`total_events`, `remaining`, `pending`,
+        `awaiting_customer`, ...). Either signal ends the loop.
+        """
         try:
             data = client.get_scenario_run(run.run_id) or {}
         except (VisecaAPIError, VisecaConnectionError) as exc:
             logger.warning("run_progress_check_failed run_id=%s error=%s", run.run_id, exc)
             return False
-        counters = data.get("event_counters", data) or {}
+        counters = data.get("counters") or {}
         run.event_counters = counters
         run.save(update_fields=["event_counters"])
-        total = counters.get("events_total")
-        processed = counters.get("events_processed")
-        finished = total is not None and processed is not None and processed >= total
+        settled = (
+            bool(counters)
+            and counters.get("remaining") == 0
+            and counters.get("pending") == 0
+            and counters.get("awaiting_customer") == 0
+        )
+        finished = data.get("status") in RUN_FINISHED_STATUSES or settled
         if finished and run.status == Run.Status.RUNNING:
-            run.status = Run.Status.COMPLETED
+            run.status = (
+                Run.Status.FAILED if data.get("status") == "failed" else Run.Status.COMPLETED
+            )
             run.finished_at = timezone.now()
             run.save(update_fields=["status", "finished_at"])
         return finished
@@ -208,17 +314,19 @@ class Command(BaseCommand):
             logger.error("envelope_missing_data run_id=%s", run_id)
             return
 
-        try:
-            parsed = parse_event(event_dict)
-        except EventParsingError as exc:
-            logger.error("event_parse_failed run_id=%s error=%s", run_id, exc)
-            return
-
         run = self._resolve_run(run_id)
         if run is None:
             logger.error(
-                "unknown_run run_id=%s authorization_id=%s", run_id, parsed.authorization_id
+                "unknown_run run_id=%s authorization_id=%s",
+                run_id,
+                envelope.get("authorization_id"),
             )
+            return
+
+        try:
+            parsed = parse_event(services.with_intent_spec(event_dict, run))
+        except EventParsingError as exc:
+            logger.error("event_parse_failed run_id=%s error=%s", run_id, exc)
             return
 
         existing = AuthorizationRecord.objects.filter(
@@ -257,7 +365,11 @@ class Command(BaseCommand):
                 authorization.authorization_id,
             )
             try:
-                parsed = parse_event(services.event_payload(authorization.raw_event))
+                parsed = parse_event(
+                    services.with_intent_spec(
+                        services.event_payload(authorization.raw_event), authorization.run
+                    )
+                )
             except EventParsingError as exc:
                 logger.error(
                     "reconcile_reparse_failed authorization_id=%s error=%s",
@@ -295,6 +407,8 @@ class Command(BaseCommand):
         self, client, authorization: AuthorizationRecord, event: AuthorizationEvent
     ) -> None:
         state = services.build_engine_state(authorization.run, authorization)
+        # What happened to fact extraction for this purchase, for --pretty output.
+        self._facts_note = None
 
         margin = (authorization.deadline_at - timezone.now()).total_seconds()
         try:
@@ -304,9 +418,11 @@ class Command(BaseCommand):
                     authorization.authorization_id,
                     margin,
                 )
-                engine_decision = _deterministic_only_decision(event, state)
+                engine_decision = _decision_without_facts(event, state)
+                self._facts_note = f"no facts: only {margin:.1f} s left, rules only"
             else:
-                engine_decision = decide(event, state)
+                facts = self._extract_within_deadline(authorization, margin)
+                engine_decision = decide(event, state, facts)
         except Exception:  # noqa: BLE001 - the engine must never leave a purchase unanswered
             logger.exception("engine_raised authorization_id=%s", authorization.authorization_id)
             engine_decision = _fallback_step_up(event)
@@ -325,13 +441,69 @@ class Command(BaseCommand):
             engine_decision.decision.value,
             list(engine_decision.reason_codes),
         )
+        if self._out is not None:
+            elapsed = (timezone.now() - authorization.received_at).total_seconds()
+            self._out.decision(event, engine_decision, elapsed, self._facts_note)
+
+    def _extract_within_deadline(
+        self, authorization: AuthorizationRecord, margin: float
+    ) -> ExtractedFacts | None:
+        """Facts for this purchase, or None when there is no time or it failed.
+
+        Runs only if the extractor's full timeout still leaves the watchdog
+        margin -- a slow model must never be the reason a deadline is missed.
+        None is safe: the semantic checks then return UNCERTAIN.
+        """
+        budget = margin - WATCHDOG_MARGIN_SECONDS
+        if budget < settings.FACTS_TIMEOUT_SECONDS:
+            logger.warning(
+                "facts_skipped authorization_id=%s margin=%.2fs",
+                authorization.authorization_id,
+                margin,
+            )
+            self._facts_note = (
+                f"no facts: {margin:.1f} s left, model needs up to "
+                f"{settings.FACTS_TIMEOUT_SECONDS:g} s"
+            )
+            return None
+        extractor = self._get_extractor()
+        started = time.monotonic()
+        try:
+            facts = extract_for_event(extractor, services.event_payload(authorization.raw_event))
+        except Exception:  # noqa: BLE001 - extraction must never block a decision
+            logger.exception("facts_failed authorization_id=%s", authorization.authorization_id)
+            self._facts_note = "no facts: the model failed"
+            return None
+        elapsed = time.monotonic() - started
+        lines = len(services.event_payload(authorization.raw_event)["authorization"]["items"])
+        read = sum(1 for item in facts.items if item.category_verified or item.attributes)
+        if facts.source != "stand-in":
+            self._facts_note = (
+                f"{facts.source} read {read}/{lines} item(s) in {elapsed:.1f} s"
+                if read
+                else f"no facts: {facts.source} gave nothing back after {elapsed:.1f} s"
+            )
+        logger.info(
+            "facts authorization_id=%s source=%s lines_read=%d/%d elapsed=%.2fs",
+            authorization.authorization_id,
+            facts.source,
+            sum(1 for item in facts.items if item.category or item.attributes),
+            lines,
+            elapsed,
+        )
+        return facts
 
     # -- customer resolutions --------------------------------------------
 
     def _forward_pending_resolutions(self, client) -> None:
+        # An answer older than the human window can no longer be accepted by the
+        # API; retrying it every cycle would only fill the log.
+        window_start = timezone.now() - timedelta(seconds=services.HUMAN_WINDOW_SECONDS)
         pending = Decision.objects.filter(
-            source=Decision.Source.CUSTOMER, forwarded_at__isnull=True
-        )
+            source=Decision.Source.CUSTOMER,
+            forwarded_at__isnull=True,
+            created_at__gte=window_start,
+        ).exclude(authorization__run__run_id__startswith=services.DEMO_RUN_PREFIX)
         for decision in pending:
             try:
                 services.forward_customer_resolution(decision, client=client)
@@ -339,3 +511,11 @@ class Command(BaseCommand):
                 logger.warning(
                     "forward_resolution_failed decision_id=%s error=%s", decision.pk, exc
                 )
+                continue
+            logger.info(
+                "resolution_forwarded authorization_id=%s decision=%s",
+                decision.authorization.authorization_id,
+                decision.decision,
+            )
+            if self._out is not None:
+                self._out.resolution(decision.authorization, decision.decision)

@@ -90,7 +90,8 @@ class Run(models.Model):
     finished_at = models.DateTimeField(null=True, blank=True)
 
     # Event counters as reported by the external API's run object (e.g.
-    # {"events_total": n, "events_processed": n}); shape is whatever the API returns.
+    # {"total_events": n, "remaining": n, "awaiting_customer": n, ...}); shape is
+    # whatever the API returns.
     event_counters = models.JSONField(default=dict, blank=True)
 
     created_at = models.DateTimeField(auto_now_add=True)
@@ -114,6 +115,7 @@ class AuthorizationRecord(models.Model):
             return self.annotate(
                 latest_decision_value=Subquery(latest.values("decision")[:1]),
                 latest_decision_source=Subquery(latest.values("source")[:1]),
+                latest_decision_at=Subquery(latest.values("created_at")[:1]),
             ).filter(
                 latest_decision_value=Decision.Value.STEP_UP,
                 latest_decision_source=Decision.Source.ENGINE,

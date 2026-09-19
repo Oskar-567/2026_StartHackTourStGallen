@@ -15,7 +15,30 @@ from __future__ import annotations
 
 from engine import reasons
 from engine.checks._hard_rule_engine import evaluate_rule, reason_code_for_cause, rule_scope
-from engine.types import AuthorizationEvent, CheckResult, EngineState, Evidence, Verdict
+from engine.types import AuthorizationEvent, CheckResult, EngineState, Evidence, HardRule, Verdict
+
+_AMOUNT_FIELDS = frozenset(
+    {
+        "authorization.amount",
+        "authorization.billing_amount_chf",
+        "authorization.items_subtotal",
+        "authorization.delivery_fee",
+    }
+)
+
+
+def _violation_code(rule: HardRule) -> str:
+    """Name the violation after what the rule is about.
+
+    One code for every purchase rule told the customer "over your limit" when
+    the shop was simply the wrong kind of shop. The code travels to the app and
+    the challenge API, so it has to say what actually went wrong.
+    """
+    if rule.field in _AMOUNT_FIELDS:
+        return reasons.AMOUNT_LIMIT_EXCEEDED
+    if rule.field.startswith("authorization.merchant."):
+        return reasons.MERCHANT_NOT_PERMITTED
+    return reasons.HARD_RULE_VIOLATED
 
 
 def check(
@@ -29,7 +52,7 @@ def check(
     FAIL or become UNCERTAIN, never remove one.
     """
     evidence: list[Evidence] = []
-    any_fail = False
+    failed_rule: HardRule | None = None
     any_uncertain = False
 
     for rule in event.mandate.hard_rules:
@@ -50,7 +73,7 @@ def check(
                 )
             )
         elif satisfied is False:
-            any_fail = True
+            failed_rule = failed_rule or rule
             evidence.append(
                 Evidence(
                     field=rule.field,
@@ -59,10 +82,10 @@ def check(
                 )
             )
 
-    if any_fail:
+    if failed_rule is not None:
         return CheckResult(
             verdict=Verdict.FAIL,
-            reason_code=reasons.AMOUNT_LIMIT_EXCEEDED,
+            reason_code=_violation_code(failed_rule),
             message="This purchase violates one or more of the customer's per-purchase rules.",
             evidence=tuple(evidence),
         )

@@ -15,8 +15,12 @@ HARD_RULE_VALUE_UNKNOWN = "hard_rule_value_unknown"
 # is a known, legitimate value and never uses this code.
 
 # -- checks/amount.py: mandate hard_rules with scope="purchase" (default) --
+# The failing rule's field picks the code, so a shop outside the customer's
+# chosen kind of retailer is not reported as a spending-limit breach.
 AMOUNT_LIMIT_EXCEEDED = "amount_limit_exceeded"
 AMOUNT_RULE_UNCERTAIN = "amount_rule_uncertain"
+MERCHANT_NOT_PERMITTED = "merchant_not_permitted"
+HARD_RULE_VIOLATED = "hard_rule_violated"
 
 # -- checks/period.py: mandate hard_rules with scope="period" --
 PERIOD_LIMIT_EXCEEDED = "period_limit_exceeded"
@@ -31,6 +35,9 @@ PERIOD_RULE_UNCERTAIN = "period_rule_uncertain"
 MERCHANT_UNFAMILIAR = "merchant_unfamiliar"
 MERCHANT_COUNTRY_UNFAMILIAR = "merchant_country_unfamiliar"
 MERCHANT_LOOKALIKE_NAME = "merchant_lookalike_name"
+
+# -- checks/injection.py --
+MERCHANT_TEXT_INSTRUCTION = "merchant_text_instruction"
 
 # -- checks/session.py --
 SESSION_NEW_DEVICE = "session_new_device"
@@ -48,9 +55,17 @@ TERMS_NON_REVERSIBLE = "terms_non_reversible"
 
 # -- checks/item_match.py (stub) --
 ITEM_MATCH_FACTS_UNAVAILABLE = "item_match_facts_unavailable"
+ITEM_MATCH_ATTRIBUTE_MISMATCH = "item_match_attribute_mismatch"
+ITEM_MATCH_ATTRIBUTE_UNKNOWN = "item_match_attribute_unknown"
+ITEM_MATCH_BELOW_MINIMUM = "item_match_below_minimum"
+ITEM_MATCH_POSSIBLE_SUBSTITUTE = "item_match_possible_substitute"
 
 # -- checks/purpose_fit.py (stub) --
 PURPOSE_FIT_FACTS_UNAVAILABLE = "purpose_fit_facts_unavailable"
+PURPOSE_FIT_UNREQUESTED_ITEM = "purpose_fit_unrequested_item"
+PURPOSE_FIT_CATEGORY_UNKNOWN = "purpose_fit_category_unknown"
+PURPOSE_FIT_CATEGORY_UNVERIFIED = "purpose_fit_category_unverified"
+PURPOSE_ALREADY_FULFILLED = "purpose_already_fulfilled"
 
 # -- aggregate.py: no check fired anything notable --
 NO_CONCERNS = "no_concerns"

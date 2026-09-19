@@ -18,7 +18,7 @@ readable per-purchase table, not just a dump of raw decisions.
 The scenario's cardholder instruction (`scenario_catalogue.csv`) is not run
 through a natural-language policy compiler here -- that is a different
 concern (see `api/services.create_mandate_draft`, which takes an
-already-structured policy). `_SCENARIO_POLICIES` below is a small, explicit,
+already-structured policy). `api.reference_policies.REFERENCE_POLICIES` is a small, explicit,
 hand-written reference policy per public scenario capturing only the
 instruction's numeric limits, so this command has something to evaluate
 against offline. Item/shop/terms requirements the instructions mention are
@@ -31,6 +31,7 @@ from __future__ import annotations
 
 import csv
 import sys
+import time
 from collections import defaultdict
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
@@ -41,104 +42,13 @@ from typing import Any
 from django.conf import settings
 from django.core.management.base import BaseCommand, CommandError
 
-from api.services import familiarity_from_rows
+from api.models import AuthorizationRecord, Decision, Mandate, Run
+from api.reference_policies import REFERENCE_POLICIES
+from api.services import DEMO_RUN_PREFIX, familiarity_from_rows
 from engine.decide import decide
 from engine.parsing import EventParsingError, parse_event
 from engine.types import ApprovedPurchase, DecisionType, EngineState
-
-_SCENARIO_POLICIES: dict[str, dict[str, Any]] = {
-    "SCEN0000": {
-        "instruction": (
-            "Buy one ordinary grocery item for CHF 20 or less from a shop I use regularly. "
-            "Ask me when uncertain."
-        ),
-        "hard_rules": [
-            {
-                "field": "authorization.billing_amount_chf",
-                "operator": "<=",
-                "value": 20,
-                "currency": "CHF",
-                "scope": "purchase",
-            },
-        ],
-        "uncertainty_policy": "ask",
-    },
-    "SCEN0001": {
-        "instruction": (
-            "Order our household groceries for delivery. Keep each order at or below CHF 120 "
-            "including delivery, and keep the total across any seven days at or below CHF 300. "
-            "Ask me when uncertain."
-        ),
-        "hard_rules": [
-            {
-                "field": "authorization.billing_amount_chf",
-                "operator": "<=",
-                "value": 120,
-                "currency": "CHF",
-                "scope": "purchase",
-            },
-            {
-                "field": "authorization.billing_amount_chf",
-                "operator": "<=",
-                "value": 300,
-                "currency": "CHF",
-                "scope": "period",
-                "period_days": 7,
-            },
-        ],
-        "uncertainty_policy": "ask",
-    },
-    "SCEN0002": {
-        "instruction": (
-            "Replace my worn road-running shoes in size 43. Buy only from a specialist sports "
-            "retailer, only if the order can be returned within 14 days or more, and pay no "
-            "more than CHF 200. Ask me when uncertain."
-        ),
-        "hard_rules": [
-            {
-                "field": "authorization.billing_amount_chf",
-                "operator": "<=",
-                "value": 200,
-                "currency": "CHF",
-                "scope": "purchase",
-            },
-        ],
-        "uncertainty_policy": "ask",
-    },
-    "SCEN0003": {
-        "instruction": (
-            "The agent may buy clothing for me, up to CHF 250 per order, from shops I have used "
-            "before. Pause anything that looks like someone other than me is driving the "
-            "session. Ask me when uncertain."
-        ),
-        "hard_rules": [
-            {
-                "field": "authorization.billing_amount_chf",
-                "operator": "<=",
-                "value": 250,
-                "currency": "CHF",
-                "scope": "purchase",
-            },
-        ],
-        "uncertainty_policy": "ask",
-    },
-    "SCEN0004": {
-        "instruction": (
-            "Buy the 27-inch monitor I chose, from a seller I have bought from before, for CHF "
-            "400 or less. Do not add anything I did not ask for. Ask me when uncertain."
-        ),
-        "hard_rules": [
-            {
-                "field": "authorization.billing_amount_chf",
-                "operator": "<=",
-                "value": 400,
-                "currency": "CHF",
-                "scope": "purchase",
-            },
-        ],
-        "uncertainty_policy": "ask",
-    },
-}
+from facts import build_extractor, extract_for_event
 
 
 class ReplayError(Exception):
@@ -303,7 +213,12 @@ def _build_event(
             "purchase_description": row["purchase_description"],
             "items": item_dicts,
         },
-        "mandate": mandate_snapshot | {"hard_rules": policy["hard_rules"]},
+        "mandate": mandate_snapshot
+        | {
+            "hard_rules": policy["hard_rules"],
+            # Caller-supplied: the live event never carries this (see types.Mandate).
+            "intent_spec": policy.get("intent_spec"),
+        },
         "context": {"approved_spend_in_period_chf": None, "recent_authorizations": []},
         "runtime": {
             "received_at": deadline_at,
@@ -330,6 +245,56 @@ def _format_row(
     )
 
 
+def _seed_run(scenario_id: str, policy: dict[str, Any]) -> Run:
+    """A local mandate and run to hang seeded step-ups on.
+
+    Never sent to the challenge API: the run ID carries `DEMO_RUN_PREFIX`, which
+    the worker skips when forwarding customer answers.
+    """
+    now = datetime.now(UTC)
+    mandate = Mandate.objects.create(
+        instruction=policy["instruction"],
+        hard_rules=policy["hard_rules"],
+        uncertainty_policy=policy["uncertainty_policy"],
+        intent_spec=policy.get("intent_spec") or {},
+        status=Mandate.Status.ACTIVE,
+        mandate_id=f"{DEMO_RUN_PREFIX}{scenario_id}",
+        confirmed_at=now,
+    )
+    return Run.objects.create(
+        run_id=f"{DEMO_RUN_PREFIX}{scenario_id}-{now:%H%M%S}",
+        scenario_id=scenario_id,
+        mandate=mandate,
+        started_at=now,
+    )
+
+
+def _seed_step_up(run: Run, event_dict: dict, parsed, result) -> None:
+    """Store one engine step-up exactly as the worker would, minus the API call."""
+    now = datetime.now(UTC)
+    authorization = AuthorizationRecord.objects.create(
+        run=run,
+        authorization_id=f"{run.run_id}-{parsed.authorization_id}",
+        source_authorization_id=parsed.source_authorization_id,
+        raw_event=event_dict,
+        simulated_purchased_at=parsed.timestamp,
+        deadline_at=parsed.deadline_at,
+        received_at=now,
+        billing_amount_chf=parsed.billing_amount_chf,
+    )
+    payload = result.to_api_payload()
+    Decision.objects.create(
+        authorization=authorization,
+        decision=Decision.Value.STEP_UP,
+        reason_codes=payload["reason_codes"],
+        evidence=payload["evidence"],
+        customer_message=result.customer_message,
+        engine_version=result.engine_version,
+        is_final=False,
+        source=Decision.Source.ENGINE,
+    )
+
+
 class Command(BaseCommand):
     help = (
         "Offline replay of a scenario's purchase attempts against the engine "
@@ -338,14 +303,31 @@ class Command(BaseCommand):
 
     def add_arguments(self, parser) -> None:
         parser.add_argument("--scenario", dest="scenario_id", default="SCEN0000")
+        parser.add_argument(
+            "--seed-queue",
+            action="store_true",
+            help=(
+                "Also store every step_up in the local database, so the app's approval "
+                "queue can be tried without a live run. Needs the database."
+            ),
+        )
+        parser.add_argument(
+            "--facts",
+            dest="facts_backend",
+            default=None,
+            help=(
+                "Fact-extraction backend: stand-in, local, or hosted. Defaults to "
+                "FACTS_BACKEND. Use it to compare backends on identical input."
+            ),
+        )
 
     def handle(self, *args, **options) -> None:
         scenario_id = options["scenario_id"]
-        policy = _SCENARIO_POLICIES.get(scenario_id)
+        policy = REFERENCE_POLICIES.get(scenario_id)
         if policy is None:
             raise CommandError(
                 f"No reference policy for {scenario_id!r}; known scenarios: "
-                f"{sorted(_SCENARIO_POLICIES)}"
+                f"{sorted(REFERENCE_POLICIES)}"
             )
 
         data_dir_value = getattr(settings, "VISECA_DATA_DIR", "") or ""
@@ -410,8 +392,23 @@ class Command(BaseCommand):
         )
         self.stdout.write("-" * 100)
 
+        extractor = build_extractor(options.get("facts_backend"))
+        self.stdout.write(f"Fact extraction: {extractor.name}")
+        # Load the model before the first purchase: otherwise the first
+        # extraction pays the model load and times out, and purchase 1 is
+        # decided without facts.
+        warm_up = getattr(extractor, "warm_up", None)
+        if callable(warm_up):
+            loaded = warm_up()
+            self.stdout.write(f"Model warm-up: {'ok' if loaded else 'FAILED (see log)'}")
+        self.stdout.write("-" * 100)
+
+        lines_seen = lines_with_attributes = lines_with_category = 0
+        extraction_seconds: list[float] = []
         state = ReplayState.seeded(merchant_counts, device_counts)
         exit_code = 0
+        seed_run = _seed_run(scenario_id, policy) if options.get("seed_queue") else None
+        seeded = 0
         for row in scenario_rows:
             authorization_id = row["authorization_id"]
             try:
@@ -439,7 +436,17 @@ class Command(BaseCommand):
                 continue
 
             engine_state = state.as_engine_state()
-            result = decide(parsed, engine_state)
+            started = time.monotonic()
+            facts = extract_for_event(extractor, event_dict)
+            extraction_seconds.append(time.monotonic() - started)
+            lines_seen += len(event_dict["authorization"]["items"])
+            lines_with_attributes += sum(1 for f in facts.items if f.attributes)
+            lines_with_category += sum(1 for f in facts.items if f.category)
+            result = decide(parsed, engine_state, facts)
+            # Before the Decimal swap below: raw_event must stay JSON-serialisable.
+            if seed_run is not None and result.decision is DecisionType.STEP_UP:
+                _seed_step_up(seed_run, event_dict, parsed, result)
+                seeded += 1
 
             # parse_event already validated this dict; swap in the Decimal it
             # parsed so ReplayState.record carries an exact amount forward.
@@ -457,15 +464,40 @@ class Command(BaseCommand):
                     state.approved_total_chf,
                 )
             )
-            self.stdout.write(f"      {result.customer_message}")
+            self.stdout.write(
+                f"      {result.customer_message}  [facts {extraction_seconds[-1]:.2f}s]"
+            )
             for evidence in result.evidence:
                 self.stdout.write(f"        - {evidence.field}: {evidence.note}")
 
         self.stdout.write("-" * 100)
+        # Extraction coverage, so a silently dead backend cannot be mistaken for a
+        # measured one: nothing read across every line means nothing was measured.
+        self.stdout.write(
+            f"Facts from {extractor.name}: {lines_with_category}/{lines_seen} lines got a "
+            f"category, {lines_with_attributes}/{lines_seen} got attributes."
+        )
+        if extraction_seconds:
+            # The number to hold against the decision deadline: the worst case,
+            # not the average, is what misses it.
+            self.stdout.write(
+                f"Extraction time: max {max(extraction_seconds):.2f}s, "
+                f"mean {sum(extraction_seconds) / len(extraction_seconds):.2f}s "
+                f"(timeout {settings.FACTS_TIMEOUT_SECONDS:g}s)."
+            )
+        if lines_seen and not (lines_with_attributes or lines_with_category):
+            self.stderr.write(
+                "WARNING: the extractor returned nothing for any line. Is the backend reachable?"
+            )
         self.stdout.write(
             f"Final approved total: CHF {state.approved_total_chf:.2f} across "
             f"{len(state.approved_purchases)} approved purchase(s)."
         )
+
+        if seed_run is not None:
+            self.stdout.write(
+                f"Seeded {seeded} step-up(s) into the approval queue (run {seed_run.run_id})."
+            )
 
         if exit_code:
             sys.exit(exit_code)

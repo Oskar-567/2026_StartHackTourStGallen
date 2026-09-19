@@ -62,6 +62,32 @@ def event_payload(raw_event: dict) -> dict:
     return data if isinstance(data, dict) else raw_event
 
 
+#: How long the customer has to answer a step-up: the challenge API's default
+#: human window (`/v1/bootstrap` -> `timeouts.human_timeout_seconds`), distinct
+#: from `deadline_at`, the ~8s automated deadline.
+HUMAN_WINDOW_SECONDS = 120
+
+#: Run IDs created locally by `replay --seed-queue` to try the approval queue.
+#: They never existed at the challenge API, so nothing about them is forwarded.
+DEMO_RUN_PREFIX = "demo-"
+
+
+def with_intent_spec(event: dict, run: Run) -> dict:
+    """The event with the run's confirmed `intent_spec` attached to its mandate.
+
+    The challenge API stores only `hard_rules` and `uncertainty_policy`; the
+    semantic half of the customer's policy (purpose, required attributes, item
+    type) lives in our own `Mandate` row. Without it the semantic checks have
+    nothing to compare against and every purchase becomes a question.
+
+    Returns a copy: the stored `raw_event` stays exactly what the API sent.
+    """
+    intent_spec = run.mandate.intent_spec
+    if not intent_spec:
+        return event
+    return {**event, "mandate": {**event.get("mandate", {}), "intent_spec": intent_spec}}
+
+
 def _authorization_payload(raw_event: dict) -> dict:
     return event_payload(raw_event).get("authorization", {}) or {}
 

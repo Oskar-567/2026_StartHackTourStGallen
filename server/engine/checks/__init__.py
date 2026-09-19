@@ -28,6 +28,8 @@ from collections.abc import Callable
 from engine.checks import (
     amount,
     duplicate,
+    fulfilment,
+    injection,
     item_match,
     merchant,
     period,
@@ -40,12 +42,16 @@ from engine.types import AuthorizationEvent, CheckResult, EngineState, Extracted
 Check = Callable[[AuthorizationEvent, EngineState, ExtractedFacts | None], CheckResult]
 
 DETERMINISTIC_CHECKS: tuple[Check, ...] = (
+    # First, so that when it is the reason to ask, its message is the one the
+    # customer reads (the first UNCERTAIN message wins in aggregate.combine).
+    injection.check,
     amount.check,
     period.check,
     merchant.check,
     session.check,
     duplicate.check,
     terms.check,
+    fulfilment.check,
 )
 
 SEMANTIC_CHECKS: tuple[Check, ...] = (

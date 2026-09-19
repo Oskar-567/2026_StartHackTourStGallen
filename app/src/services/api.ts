@@ -74,3 +74,118 @@ export async function fetchHealth(): Promise<Health> {
     throw error;
   }
 }
+
+// --- Approval queue (step-ups) ---------------------------------------------
+
+export type Evidence = {
+  field: string;
+  value: unknown;
+  note: string;
+};
+
+export type StepUpItem = {
+  item_name: string;
+  quantity: number;
+  unit_price: number;
+  item_details: string | null;
+};
+
+/** A purchase the engine paused for the customer: `GET /api/step-ups/`. */
+export type StepUp = {
+  id: number;
+  authorization_id: string;
+  scenario_id: string;
+  merchant_name: string | null;
+  purchase_description: string | null;
+  items: StepUpItem[];
+  /** Decimal serialized as a string, e.g. "189.00". */
+  billing_amount_chf: string;
+  reason_codes: string[];
+  customer_message: string;
+  evidence: Evidence[];
+  /** When the customer's answer window closes (ISO timestamp). */
+  respond_by: string | null;
+  seconds_remaining: number;
+};
+
+export type StepUpAnswer = "approve" | "decline";
+
+export function fetchStepUps(): Promise<StepUp[]> {
+  return request<StepUp[]>("/api/step-ups/");
+}
+
+export function resolveStepUp(id: number, decision: StepUpAnswer, message = ""): Promise<StepUp> {
+  return request<StepUp>(`/api/step-ups/${id}/resolve/`, {
+    method: "POST",
+    body: JSON.stringify({ decision, message }),
+  });
+}
+
+/** The first readable message from a DRF error body, for showing to the customer. */
+export function errorMessage(error: unknown): string {
+  if (error instanceof ApiError && error.body && typeof error.body === "object") {
+    const body = error.body as Record<string, unknown>;
+    const first = body.detail ?? body.non_field_errors ?? Object.values(body)[0];
+    if (typeof first === "string") return first;
+    if (Array.isArray(first) && typeof first[0] === "string") return first[0];
+  }
+  return error instanceof Error ? error.message : String(error);
+}
+
+// --- Wallet policy (mandates) ------------------------------------------------
+
+export type HardRule = {
+  field: string;
+  operator: "<" | "<=" | "=" | "!=" | ">" | ">=" | "in" | "not_in";
+  value: number | string | string[];
+  currency?: string | null;
+  scope?: "purchase" | "period" | null;
+  period_days?: number | null;
+};
+
+export type UncertaintyPolicy = "ask" | "decline" | "approve";
+
+/** `GET /api/mandates/` — the customer's wallet policy as stored by our server. */
+export type Mandate = {
+  id: number;
+  instruction: string;
+  hard_rules: HardRule[];
+  uncertainty_policy: UncertaintyPolicy;
+  guidance: string[];
+  open_questions: string[];
+  status: "draft" | "active" | "revoked";
+  draft_id: string;
+  mandate_id: string;
+  confirmed_by: string;
+  confirmed_at: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+/** Additive only: existing rules must be resent unchanged; the server refuses anything weaker. */
+export type MandateTightening = {
+  hard_rules?: HardRule[];
+  uncertainty_policy?: UncertaintyPolicy;
+};
+
+export function fetchMandates(): Promise<Mandate[]> {
+  return request<Mandate[]>("/api/mandates/");
+}
+
+export function confirmMandate(id: number, confirmedBy = "customer (app)"): Promise<Mandate> {
+  return request<Mandate>(`/api/mandates/${id}/confirm/`, {
+    method: "POST",
+    body: JSON.stringify({ confirmed_by: confirmedBy }),
+  });
+}
+
+export function tightenMandate(id: number, change: MandateTightening): Promise<Mandate> {
+  return request<Mandate>(`/api/mandates/${id}/tighten/`, {
+    method: "POST",
+    body: JSON.stringify(change),
+  });
+}
+
+export function revokeMandate(id: number): Promise<Mandate> {
+  return request<Mandate>(`/api/mandates/${id}/revoke/`, { method: "POST" });
+}

@@ -33,6 +33,7 @@ from engine.types import (
     AuthorizationEvent,
     EventContext,
     HardRule,
+    IntentSpec,
     Item,
     Mandate,
     Merchant,
@@ -247,6 +248,52 @@ def _parse_mandate(raw: dict[str, Any], path: str) -> Mandate:
             raw, "uncertainty_policy", path, allowed={"ask", "decline", "approve"}
         ),
         profile_id=_get_str(raw, "profile_id", path),
+        intent_spec=_parse_intent_spec(raw.get("intent_spec"), f"{path}.intent_spec"),
+    )
+
+
+def _parse_intent_spec(raw: Any, path: str) -> IntentSpec | None:
+    """Optional and caller-supplied: the live event never carries it.
+
+    A malformed spec is rejected rather than half-read. Quietly dropping the
+    half we could not parse would silently widen what the customer allowed,
+    and widening a policy by accident is the one failure this engine must not
+    have.
+    """
+    if raw is None:
+        return None
+    if not isinstance(raw, dict):
+        _fail(path, "'intent_spec' must be an object when present")
+    categories = raw.get("allowed_item_categories", [])
+    if not isinstance(categories, list) or not all(isinstance(c, str) for c in categories):
+        _fail(path, "'allowed_item_categories' must be a list of strings")
+    attributes = raw.get("required_attributes", {})
+    if not isinstance(attributes, dict) or not all(
+        isinstance(k, str) and isinstance(v, str) for k, v in attributes.items()
+    ):
+        _fail(path, "'required_attributes' must be a mapping of string to string")
+    purpose = raw.get("purpose", "")
+    if not isinstance(purpose, str):
+        _fail(path, "'purpose' must be a string")
+    minimums = raw.get("minimum_attributes", {})
+    if not isinstance(minimums, dict) or not all(
+        isinstance(k, str) and isinstance(v, int | float) and not isinstance(v, bool)
+        for k, v in minimums.items()
+    ):
+        _fail(path, "'minimum_attributes' must be a mapping of string to number")
+    fulfilment = raw.get("fulfilment")
+    if fulfilment not in (None, "single", "recurring"):
+        _fail(path, "'fulfilment' must be 'single', 'recurring' or absent")
+    item_type = raw.get("item_type")
+    if item_type is not None and (not isinstance(item_type, str) or not item_type.strip()):
+        _fail(path, "'item_type' must be a non-empty string or absent")
+    return IntentSpec(
+        purpose=purpose,
+        allowed_item_categories=frozenset(categories),
+        required_attributes=dict(attributes),
+        minimum_attributes={k: float(v) for k, v in minimums.items()},
+        fulfilment=fulfilment,
+        item_type=item_type,
     )
 
 

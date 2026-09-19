@@ -1,7 +1,11 @@
+from datetime import datetime, timedelta
+
 from django.utils import timezone
+from drf_spectacular.utils import extend_schema_field
 from rest_framework import serializers
 
 from api.models import AuthorizationRecord, Decision, Mandate
+from api.services import HUMAN_WINDOW_SECONDS
 
 
 class MandateSerializer(serializers.ModelSerializer):
@@ -97,6 +101,14 @@ class MandateTightenSerializer(serializers.Serializer):
         )
 
 
+class _EvidenceSerializer(serializers.Serializer):
+    """One piece of evidence behind a decision, as the engine recorded it."""
+
+    field = serializers.CharField()
+    value = serializers.JSONField(allow_null=True)
+    note = serializers.CharField()
+
+
 class _MerchantSummarySerializer(serializers.Serializer):
     """Shape of `raw_event.authorization.merchant`, for schema purposes only."""
 
@@ -122,6 +134,8 @@ class StepUpSerializer(serializers.ModelSerializer):
     items = serializers.SerializerMethodField()
     reason_codes = serializers.SerializerMethodField()
     customer_message = serializers.SerializerMethodField()
+    evidence = serializers.SerializerMethodField()
+    respond_by = serializers.SerializerMethodField()
     seconds_remaining = serializers.SerializerMethodField()
     scenario_id = serializers.CharField(source="run.scenario_id", read_only=True)
 
@@ -137,7 +151,9 @@ class StepUpSerializer(serializers.ModelSerializer):
             "billing_amount_chf",
             "reason_codes",
             "customer_message",
+            "evidence",
             "deadline_at",
+            "respond_by",
             "seconds_remaining",
         ]
 
@@ -170,8 +186,24 @@ class StepUpSerializer(serializers.ModelSerializer):
         decision = self._latest_engine_step_up(obj)
         return decision.customer_message if decision else ""
 
+    @extend_schema_field(_EvidenceSerializer(many=True))
+    def get_evidence(self, obj: AuthorizationRecord) -> list:
+        decision = self._latest_engine_step_up(obj)
+        return decision.evidence if decision else []
+
+    def get_respond_by(self, obj: AuthorizationRecord) -> datetime | None:
+        """When the customer's window closes: the step-up plus the human window."""
+        decision = self._latest_engine_step_up(obj)
+        if decision is None:
+            return None
+        return decision.created_at + timedelta(seconds=HUMAN_WINDOW_SECONDS)
+
     def get_seconds_remaining(self, obj: AuthorizationRecord) -> float:
-        return max(0.0, (obj.deadline_at - timezone.now()).total_seconds())
+        """Seconds left for the customer to answer -- not the automated deadline."""
+        respond_by = self.get_respond_by(obj)
+        if respond_by is None:
+            return 0.0
+        return max(0.0, (respond_by - timezone.now()).total_seconds())
 
 
 class StepUpResolveSerializer(serializers.Serializer):
