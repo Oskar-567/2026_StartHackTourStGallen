@@ -22,7 +22,10 @@ def test_step_up_queue_includes_pending_step_up_with_customer_facing_details(api
     assert item["items"] == [{"item_name": "Bread", "quantity": 1, "unit_price": 4.5}]
     assert item["reason_codes"] == ["customer_confirmation"]
     assert item["customer_message"] == "Please review this purchase."
-    assert item["seconds_remaining"] > 0
+    # The customer's 120s window, not the ~8s automated deadline.
+    assert 100 < item["seconds_remaining"] <= 120
+    assert item["respond_by"]
+    assert item["evidence"] == []
 
 
 @pytest.mark.django_db
