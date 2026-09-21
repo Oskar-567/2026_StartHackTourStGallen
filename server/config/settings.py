@@ -127,7 +127,7 @@ FACTS_BACKEND = os.environ.get("FACTS_BACKEND", "stand-in")
 FACTS_TIMEOUT_SECONDS = float(os.environ.get("FACTS_TIMEOUT_SECONDS", "4"))
 OLLAMA_HOST = os.environ.get("OLLAMA_HOST", "http://127.0.0.1:11434")
 # A non-reasoning model on purpose: this is extraction, not thinking, and every
-# reasoning token is latency against an 8s deadline. See docs/SETUP-LLM.md.
+# reasoning token is latency against an 8s deadline.
 OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "qwen2.5:3b")
 # Reasoning models think before answering. For a one-sentence extraction that is
 # pure latency against an 8s deadline, so it is off unless deliberately enabled.

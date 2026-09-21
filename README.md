@@ -170,7 +170,7 @@ flowchart LR
   → decision*. Checks for spending limits (per purchase and per period), kind of shop,
   return terms, the right item and attributes, substitutes, unrequested extras, a purpose
   already fulfilled, manipulation, session signals (new device, bursts), lookalike shop
-  names and duplicates. Explained in [docs/ENGINE.md](docs/ENGINE.md).
+  names and duplicates.
 - **Worker** (`run_worker`): long-polls the Viseca API, extracts facts within the time
   budget, decides, submits, and forwards the customer's answers within about 2 seconds.
 - **Customer app** (`app/`): the approval queue and the wallet policy (review, confirm,
@@ -265,9 +265,7 @@ and timing.
 │   ├── api/           Django models, REST API for the app, worker, demo and replay commands
 │   └── tests/         pytest suite
 ├── app/               Expo app: approval queue and wallet policy
-├── scripts/           start-server.sh, start-app.sh (macOS)
-└── docs/              ENGINE.md (how decisions are made), SETUP-LLM.md (local model),
-                       NEXT-STEPS.md, DEVELOPMENT.md (team workflow)
+└── scripts/           start-server.sh, start-app.sh (macOS)
 ```
 
 ## Limits and Next Steps
@@ -281,11 +279,3 @@ and timing.
   time budget and those purchases become questions. That is safe, but it adds friction.
 - **Inside Viseca one.** The approval queue and the policy screen are built to become part of
   the app customers already use.
-
----
-
-<div align="center">
-<sub>Team workflow and CI/CD: <a href="docs/DEVELOPMENT.md">docs/DEVELOPMENT.md</a> ·
-Engine: <a href="docs/ENGINE.md">docs/ENGINE.md</a> ·
-Local model setup: <a href="docs/SETUP-LLM.md">docs/SETUP-LLM.md</a></sub>
-</div>

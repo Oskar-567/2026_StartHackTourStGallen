@@ -11,8 +11,6 @@
 ![uv](https://img.shields.io/badge/uv-managed-DE5FE9?logo=uv&logoColor=white)
 ![Ruff](https://img.shields.io/badge/code_style-ruff-D7FF64?logo=ruff&logoColor=black)
 
-[**Production API docs**](https://hackathon-server-k39f.onrender.com/api/docs/) ·
-[**Health**](https://hackathon-server-k39f.onrender.com/health/) ·
 [← Back to main README](../README.md)
 
 </div>
