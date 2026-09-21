@@ -18,6 +18,11 @@ Viseca challenge · START Hack Tour St. Gallen 2026 · Team **brAInstorming**
 
 ---
 
+> [!NOTE]
+> **Status:** hackathon project, September 2026. The hosted demo instances
+> (Render, Expo Hosting) have been shut down. Everything described below runs
+> locally, see [Running It](#running-it).
+
 ## Team brAInstorming
 
 - **Dewang Makani**
@@ -46,6 +51,23 @@ returns exactly one answer, within the challenge's 8-second deadline:
 
 Each decision carries structured reason codes and evidence, so it can always be
 explained: what was permitted, which facts were used, and why.
+
+### Demo
+
+Two sides of the same system: what the customer gets asked, and how the server got
+there.
+
+https://github.com/user-attachments/assets/f8d42373-4772-412b-9ea5-fdbbf36b0b8a
+
+*The customer side of a `step_up`: every purchase the wallet could not confirm
+arrives in the app as a card with its reason and the evidence behind it, and the
+customer approves or declines it there.*
+
+![Terminal output of `manage.py demo SCEN0004`: each purchase with its decision, the reason, the extraction time and the answers the customer gave](docs/images/console-output.png)
+
+*The server side: every purchase with its decision and its reason, both attempts by
+the shop to instruct the wallet quoted back as evidence, the purchase over the limit
+declined, and the customer's answers arriving before the deadline.*
 
 ## Data Stays In-House
 
@@ -219,6 +241,8 @@ uv run python manage.py demo SCEN0004     # a shop tries to instruct the wallet
 the terminal: every purchase with its decision, the reason in plain words, whether the
 local model read the listing and how long it took, and every answer the customer gives
 on the phone. Questions appear in the app within two seconds; the customer has 120 seconds.
+
+The terminal output under [Demo](#demo) comes from exactly this command.
 
 ### Offline, without the API
 
