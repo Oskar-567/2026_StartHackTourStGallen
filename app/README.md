@@ -9,8 +9,6 @@
 ![TypeScript](https://img.shields.io/badge/TypeScript-strict-3178C6?logo=typescript&logoColor=white)
 ![Expo Router](https://img.shields.io/badge/expo--router-file--based-000020?logo=expo&logoColor=white)
 
-[**Web app**](https://123onetothree-hackathon.expo.app) ·
-[**Android APK**](https://expo.dev/accounts/123onetothree/projects/hackathon/builds) ·
 [← Back to main README](../README.md)
 
 </div>

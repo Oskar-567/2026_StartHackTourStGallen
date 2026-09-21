@@ -19,12 +19,11 @@ node_modules/
 Thumbs.db
 .idea/
 
-# Claude Code (local settings only)
+# Agent instructions and working docs: kept locally, not part of the public repository
 .claude/settings.local.json
-/docs/superpowers/
-/docs/HACKATHON-SETUP-GUIDE.md
-/docs/TEARDOWN.md
-/docs/PITCH.md
+/CLAUDE.md
+/app/AGENTS.md
+/docs/
 
 # Local demo recordings (embedded in the README via GitHub upload, not committed)
 /Viseca_Control.mp4

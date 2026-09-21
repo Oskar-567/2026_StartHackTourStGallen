@@ -27,7 +27,7 @@ Currency = Literal["CHF", "EUR", "GBP", "USD"]
 # order_returnable / order_cancellable / related_authorization_status use these
 # tri/four-state strings on purpose: "unknown" (not supplied) is never the same
 # as "not_applicable" (does not apply to this fulfilment type), and neither may
-# be coerced to a boolean. See CLAUDE.md / challenge data_dictionary.md.
+# be coerced to a boolean. See the challenge data pack's data_dictionary.md.
 TrileanStr = Literal["true", "false", "unknown", "not_applicable"]
 
 

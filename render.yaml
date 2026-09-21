@@ -23,8 +23,8 @@ services:
         value: "False"
       - key: CORS_ALLOWED_ORIGINS
         sync: false
-      # The worker (run_worker) does not run on Render (see CLAUDE.md Architecture
-      # Decisions), but the web service still needs these to serve mandate-lifecycle
+      # The worker (run_worker) does not run on Render: the free tier has no background
+      # worker type and spins down. The web service still needs these to serve mandate-lifecycle
       # endpoints (confirm/tighten/revoke) against the real challenge API.
       - key: VISECA_BASE_URL
         sync: false
