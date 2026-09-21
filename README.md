@@ -18,6 +18,11 @@ Viseca challenge · START Hack Tour St. Gallen 2026 · Team **brAInstorming**
 
 ---
 
+> [!NOTE]
+> **Status:** hackathon project, September 2026. The hosted demo instances
+> (Render, Expo Hosting) have been shut down. Everything described below runs
+> locally, see [Running It](#running-it).
+
 ## Team brAInstorming
 
 - **Dewang Makani**
@@ -219,6 +224,12 @@ uv run python manage.py demo SCEN0004     # a shop tries to instruct the wallet
 the terminal: every purchase with its decision, the reason in plain words, whether the
 local model read the listing and how long it took, and every answer the customer gives
 on the phone. Questions appear in the app within two seconds; the customer has 120 seconds.
+
+![Terminal output of `manage.py demo SCEN0004`: each purchase with its decision, the reason, the extraction time and the answers the customer gave](docs/images/console-output.png)
+
+*`demo SCEN0004`, the manipulated agent: both attempts to instruct the wallet are
+quoted back in the evidence, the purchase over the limit is declined, and the three
+questions the customer answered on the phone reach Viseca before the deadline.*
 
 ### Offline, without the API
 
