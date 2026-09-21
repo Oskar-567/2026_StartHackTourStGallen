@@ -63,7 +63,7 @@ https://github.com/user-attachments/assets/f8d42373-4772-412b-9ea5-fdbbf36b0b8a
 arrives in the app as a card with its reason and the evidence behind it, and the
 customer approves or declines it there.*
 
-![Terminal output of `manage.py demo SCEN0004`: each purchase with its decision, the reason, the extraction time and the answers the customer gave](docs/images/console-output.png)
+![Terminal output of `manage.py demo SCEN0004`: each purchase with its decision, the reason, the extraction time and the answers the customer gave](https://github.com/user-attachments/assets/402218ba-82f0-4b12-ab87-b3492b81f516)
 
 *The server side: every purchase with its decision and its reason, both attempts by
 the shop to instruct the wallet quoted back as evidence, the purchase over the limit
